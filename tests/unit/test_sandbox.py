@@ -15,8 +15,10 @@ from crew.security.sandbox import SandboxSettings, check_available, wrap
 
 BWRAP = SandboxSettings(mode="bwrap")
 bwrap_works = check_available(BWRAP) is None
+# Linux containers only: Windows runners have a Docker daemon for Windows images.
 docker_works = (
-    shutil.which("docker") is not None
+    sys.platform.startswith("linux")
+    and shutil.which("docker") is not None
     and check_available(SandboxSettings(mode="docker", image="alpine:3.20")) is None
 )
 
