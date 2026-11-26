@@ -15,7 +15,8 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -60,6 +61,9 @@ T = TypeVar("T")
 
 # How often running stages check for a developer cancellation request.
 CANCEL_POLL_SECONDS = 0.5
+
+# The run whose work is in progress; lets the git recorder attribute commands.
+CURRENT_RUN: ContextVar[str | None] = ContextVar("crew_current_run", default=None)
 
 
 class RunCancelled(Exception):
@@ -438,7 +442,16 @@ class Orchestrator:
             report = _expect(report, ImplementationReport)
             if wt.current_branch() != branch:
                 raise PreconditionError(f"agent left branch {branch}; refusing to record result")
-            sha = wt.commit_all(f"crew({task.key}): {task.title}\n\nCREW run {run.id}")
+            commit = wt.commit_all(f"crew({task.key}): {task.title}\n\nCREW run {run.id}")
+            if commit.excluded:
+                self.store.add_event(
+                    run.id,
+                    "files_not_committed",
+                    "secret-looking or oversized new files left uncommitted: "
+                    + ", ".join(commit.excluded),
+                    task_key=task.key,
+                )
+                self.notify(f"[warning] {task.key}: not committed: {', '.join(commit.excluded)}")
             head = wt.head()
             if not head or not start_commit:
                 raise CrewError(f"could not determine commits for task {task.key}")
@@ -456,9 +469,7 @@ class Orchestrator:
                 report_json=report.model_dump_json(),
                 finished_at=utcnow(),
             )
-            self.notify(
-                f"Implementer finished: {task.key} ({len(changed)} file(s), {(sha or head)[:10]})"
-            )
+            self.notify(f"Implementer finished: {task.key} ({len(changed)} file(s), {head[:10]})")
         except asyncio.CancelledError:
             if self.store.is_cancel_requested(run.id):
                 self.store.set_task_status(
@@ -725,9 +736,15 @@ class Orchestrator:
     def _lock_path(self, run_id: str):
         return self.p.paths.run_dir(run_id) / ".lock"
 
-    def _lock(self, run_id: str) -> RunLock:
+    @contextlib.contextmanager
+    def _lock(self, run_id: str) -> Iterator[None]:
         self.store.get_run(run_id)  # NotFoundError before touching the filesystem
-        return RunLock(self._lock_path(run_id))
+        token = CURRENT_RUN.set(run_id)
+        try:
+            with RunLock(self._lock_path(run_id)):
+                yield
+        finally:
+            CURRENT_RUN.reset(token)
 
     def _run_dir(self, run: Run):
         return self.p.paths.run_dir(run.id)

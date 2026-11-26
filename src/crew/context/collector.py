@@ -8,28 +8,12 @@ Files matching secret patterns are excluded from listings and never read.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from fnmatch import fnmatch
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
+from crew.security.secret_files import SECRET_GLOBS, is_excluded
 from crew.workspace.git import Git
 
-# Gitignore-style globs, also passed to the provider as Read() deny rules.
-SECRET_GLOBS: tuple[str, ...] = (
-    "**/.env",
-    "**/.env.*",
-    "**/*.pem",
-    "**/*.key",
-    "**/*.p12",
-    "**/*.pfx",
-    "**/*.kdbx",
-    "**/id_rsa*",
-    "**/id_ed25519*",
-    "**/.netrc",
-    "**/.npmrc",
-    "**/.pypirc",
-    "**/credentials*",
-    "**/*secret*",
-)
+__all__ = ["SECRET_GLOBS", "ProjectContext", "collect_context", "is_excluded"]
 
 KEY_FILES = (
     "README.md",
@@ -45,15 +29,6 @@ KEY_FILES = (
 )
 KEY_FILE_MAX_CHARS = 6_000
 PROJECT_NOTES_MAX_CHARS = 10_000
-
-
-def is_excluded(path: str, extra: tuple[str, ...] = ()) -> bool:
-    name = PurePosixPath(path).name
-    for pattern in (*SECRET_GLOBS, *extra):
-        bare = pattern.removeprefix("**/")
-        if fnmatch(path, pattern) or fnmatch(name, bare) or fnmatch(path, bare):
-            return True
-    return False
 
 
 @dataclass

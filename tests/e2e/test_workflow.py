@@ -465,3 +465,11 @@ def test_unexpected_error_in_one_task_fails_it_cleanly(make_orch):
     assert statuses["a"] == TaskStatus.FAILED  # provider crash -> normal retry -> FAILED
     executions = orch.store.executions(run.id, role=Role.IMPLEMENTER)
     assert all(e.status != ExecutionStatus.RUNNING for e in executions)
+
+
+def test_git_commands_are_recorded_per_run(make_orch):
+    orch = make_orch()
+    run = orch.approve_plan(orch.start_run("x").id)
+    git_cmds = orch.store.commands(run.id, purpose="git")
+    assert git_cmds
+    assert any('"merge"' in c.argv_json for c in git_cmds)

@@ -67,3 +67,43 @@ def test_merge_conflict_is_detected_and_aborted(project: Project, repo: Path):
     assert igit.conflicted_files() == ["app.py"]
     igit.merge_abort()
     assert git(integration, "status", "--porcelain").strip() == ""
+
+
+def test_writes_are_refused_in_the_user_worktree(project: Project, repo: Path):
+    (repo / "new.txt").write_text("user work")
+    for args in (("add", "--all"), ("commit", "-m", "x"), ("merge", "main"), ("rm", "app.py")):
+        with pytest.raises(PolicyViolationError, match="developer's worktree"):
+            project.git.run(*args)
+    assert git(repo, "status", "--porcelain").strip() == "?? new.txt"
+
+
+def test_commit_all_keeps_new_secret_files_out(project: Project):
+    path, _ = project.workspace.create_task_worktree("r1", "t", 1, project.git.head(), [])
+    (path / ".env").write_text("API_KEY=very-secret")
+    (path / ".env.example").write_text("API_KEY=")
+    (path / "feature.py").write_text("x = 1\n")
+    result = project.git.at(path).commit_all("work")
+    assert result.sha is not None
+    assert result.excluded == [".env"]
+    committed = git(path, "show", "--name-only", "--format=", "HEAD").split()
+    assert sorted(committed) == [".env.example", "feature.py"]
+    assert (path / ".env").exists()  # left in place for inspection
+
+
+def test_repository_hooks_never_run(project: Project, repo: Path):
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    marker = repo.parent / "hook-ran"
+    hook.write_text(f"#!/bin/sh\ntouch '{marker}'\n")
+    hook.chmod(0o755)
+    path, _ = project.workspace.create_task_worktree("r1", "t", 1, project.git.head(), [])
+    (path / "f.txt").write_text("x")
+    git_wt = project.git.at(path)
+    git_wt.run("add", "f.txt")
+    git_wt.run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "x")
+    assert not marker.exists()
+
+
+def test_status_handles_unicode_and_renames(project: Project, repo: Path):
+    git(repo, "mv", "app.py", "aplikacija čćž.py")
+    status = project.git.status()
+    assert status.dirty_paths == ["aplikacija čćž.py"]

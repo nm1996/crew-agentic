@@ -93,7 +93,7 @@ def reconcile(project: Project, run: Run) -> list[str]:
             raise PreconditionError(f"integration branch {branch} is missing; cannot resume")
         if path.exists():
             igit = git.at(path)
-            if (igit.git_dir() / "MERGE_HEAD").exists():
+            if igit.merge_in_progress():
                 igit.merge_abort()
                 notes.append("aborted an interrupted merge in the integration worktree")
         else:

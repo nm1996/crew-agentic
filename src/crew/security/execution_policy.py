@@ -46,6 +46,11 @@ _GIT_DESTRUCTIVE_FLAGS = {
 }
 _GIT_NETWORK = {"push", "fetch", "pull", "clone", "remote", "ls-remote"}
 _GIT_READ_ONLY = {
+    "symbolic-ref",
+    "for-each-ref",
+    "ls-tree",
+    "rev-list",
+    "show-ref",
     "status",
     "log",
     "diff",
@@ -57,7 +62,7 @@ _GIT_READ_ONLY = {
 }
 
 
-def _git_subcommand(args: list[str]) -> tuple[str, set[str]]:
+def git_subcommand(args: list[str]) -> tuple[str, set[str]]:
     """Return git's subcommand (skipping ``-C dir`` / ``-c k=v`` globals) and its other args."""
     i = 0
     while i < len(args) and args[i].startswith("-"):
@@ -82,7 +87,7 @@ def classify_command(argv: list[str]) -> CommandCategory:
     if exe in _NETWORK_TOKENS:
         return CommandCategory.NETWORK
     if exe == "git":
-        sub, flags = _git_subcommand(argv[1:])
+        sub, flags = git_subcommand(argv[1:])
         if sub in _GIT_DESTRUCTIVE_ALWAYS:
             return CommandCategory.DESTRUCTIVE
         if flags & _GIT_DESTRUCTIVE_FLAGS.get(sub, set()):

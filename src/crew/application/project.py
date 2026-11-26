@@ -19,14 +19,15 @@ from crew.config.loader import (
 )
 from crew.config.schema import CrewConfig, ProjectSettings, ProviderSettings
 from crew.domain.errors import ConfigError, PreconditionError
-from crew.orchestrator.engine import Notify, Orchestrator, Project
+from crew.orchestrator.engine import CURRENT_RUN, Notify, Orchestrator, Project
 from crew.persistence.database import migrate
 from crew.persistence.store import Store
 from crew.providers.base import AgentProvider
 from crew.providers.claude_code.adapter import ClaudeCodeProvider
 from crew.providers.fake import FakeProvider
+from crew.security.execution_policy import classify_command
 from crew.security.redaction import RedactingFilter
-from crew.workspace.git import Git
+from crew.workspace.git import Git, GitRecorder
 from crew.workspace.worktrees import WorkspaceManager
 
 PROJECT_NOTES_TEMPLATE = """\
@@ -58,14 +59,34 @@ def open_project(start: Path | None = None) -> Project:
 
 def build_project(paths: ProjectPaths, config: CrewConfig) -> Project:
     worktree_root = paths.root / config.git.worktree_directory
-    git = Git(paths.root, owned_roots=(worktree_root,))
     store = Store.open(paths.db_file)
+    git = Git(paths.root, owned_roots=(worktree_root,), recorder=_git_recorder(store))
     workspace = WorkspaceManager(
         git, paths.root, config.git.worktree_directory, config.git.branch_prefix
     )
     project = Project(paths=paths, config=config, store=store, git=git, workspace=workspace)
     _configure_file_logging(paths)
     return project
+
+
+def _git_recorder(store: Store) -> GitRecorder:
+    """Record git invocations made on behalf of a run in ``command_executions``."""
+
+    def record(argv: list[str], cwd: Path, exit_code: int, stderr: str) -> None:
+        run_id = CURRENT_RUN.get()
+        if run_id is None:
+            return  # inspection outside a run (doctor, status, init)
+        store.record_command(
+            run_id=run_id,
+            purpose="git",
+            category=classify_command(argv),
+            argv_json=json.dumps(argv),
+            cwd=str(cwd),
+            exit_code=exit_code,
+            stderr=stderr or None,
+        )
+
+    return record
 
 
 def make_provider(config: CrewConfig) -> AgentProvider:
@@ -147,7 +168,7 @@ def init_project(
 
     # Keep CREW state out of `git status` without editing a tracked .gitignore:
     # .git/info/exclude is local to this clone.
-    exclude = git.git_dir() / "info" / "exclude"
+    exclude = git.git_path("info/exclude")  # shared by all worktrees of the clone
     exclude.parent.mkdir(parents=True, exist_ok=True)
     current = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
     if EXCLUDE_ENTRY not in current.splitlines():
