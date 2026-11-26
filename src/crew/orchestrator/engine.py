@@ -41,6 +41,7 @@ from crew.domain.errors import (
     BudgetExceededError,
     CrewError,
     InvalidTransitionError,
+    MergeConflictError,
     PlanValidationError,
     PreconditionError,
 )
@@ -476,13 +477,22 @@ class Orchestrator:
         try:
             deps = [self.store.get_task(run.id, d) for d in task.dependencies]
             path, branch = ws.create_task_worktree(
-                run.id,
-                task.key,
-                task.attempt,
-                start_point=ws.integration_branch(run.id),
-                dependency_branches=[d.branch for d in deps if d.branch],
+                run.id, task.key, task.attempt, start_point=ws.integration_branch(run.id)
             )
             wt = self.p.git.at(path)
+            for dep in deps:
+                if not dep.branch:
+                    continue
+                conflicts = ws.merge_into(path, dep.branch, f"crew: bring in dependency {dep.key}")
+                if conflicts:
+                    await self._resolve_conflict(
+                        run,
+                        path,
+                        dep.branch,
+                        conflicts,
+                        {d.key: d.report for d in deps},
+                        into=f"task {task.key}",
+                    )
             start_commit = wt.head()
             task = self.store.update_task(
                 task.pk, worktree_path=str(path), branch=branch, start_commit=start_commit
@@ -518,6 +528,19 @@ class Orchestrator:
                 self.store.add_event(
                     run.id, "task_no_changes", "task produced no changes", task_key=task.key
                 )
+            unplanned = (
+                sorted(set(changed) - set(task.expected_files)) if task.expected_files else []
+            )
+            if unplanned:
+                # Not an error (scope notes explain it), but parallel tasks touching the
+                # same unplanned file are the usual source of merge conflicts.
+                self.store.add_event(
+                    run.id,
+                    "scope_expanded",
+                    "changed files outside the plan: " + ", ".join(unplanned),
+                    task_key=task.key,
+                    data={"files": unplanned},
+                )
             self.store.set_task_status(
                 task,
                 TaskStatus.COMPLETED,
@@ -544,7 +567,7 @@ class Orchestrator:
         except CrewError as exc:
             failures = task.failures + 1
             retry = failures < self.config.execution.max_task_attempts and not isinstance(
-                exc, BudgetExceededError
+                exc, BudgetExceededError | MergeConflictError
             )
             self.store.set_task_status(
                 task,
@@ -589,14 +612,21 @@ class Orchestrator:
                 continue
             if not task.branch or not task.commit_sha:
                 raise CrewError(f"task {task.key} is COMPLETED but has no branch/commit recorded")
-            if not igit.is_ancestor(task.commit_sha, "HEAD") and not igit.merge_no_ff(
-                task.branch, f"crew: integrate {task.key} — {task.title}"
-            ):
-                conflicts = igit.conflicted_files()
-                igit.merge_abort()
-                raise CrewError(
-                    f"merge conflict integrating task {task.key} in: {', '.join(conflicts)}. "
-                    f"Task worktrees and branches were preserved under {ws.run_dir(run.id)}."
+            conflicts = ws.merge_into(
+                path, task.branch, f"crew: integrate {task.key} — {task.title}"
+            )
+            if conflicts:
+                integrated = {t.key: t.report for t in tasks.values() if t.integrated}
+                self._run_cancellable(
+                    run.id,
+                    self._resolve_conflict(
+                        run,
+                        path,
+                        task.branch,
+                        conflicts,
+                        {**integrated, task.key: task.report},
+                        into="the integration branch",
+                    ),
                 )
             self.store.update_task(task.pk, integrated=True)
             self.store.add_event(run.id, "task_integrated", task.branch, task_key=task.key)
@@ -619,6 +649,55 @@ class Orchestrator:
             network=execution.sandbox_network,
             writable_paths=tuple(Path(p) for p in execution.sandbox_writable_paths),
         )
+
+    async def _resolve_conflict(
+        self,
+        run: Run,
+        path: Path,
+        ref: str,
+        files: list[str],
+        reports: dict[str, Any],
+        *,
+        into: str,
+    ) -> None:
+        """Resolve an in-progress merge in a CREW worktree, or abort it and fail.
+
+        An Implementer edits the conflicted files; CREW then checks that no
+        conflict markers remain and creates the merge commit itself.
+        """
+        wt = self.p.git.at(path)
+        summary = f"merging {ref} into {into} conflicted in: {', '.join(files)}"
+        self.store.add_event(run.id, "merge_conflict", summary, data={"files": files})
+        if self.config.execution.conflict_resolution == "fail":
+            wt.merge_abort()
+            raise MergeConflictError(
+                f"{summary}. Worktrees and branches were preserved under "
+                f"{self.p.workspace.run_dir(run.id)}.",
+                hint="Set execution.conflict_resolution=agent to let CREW resolve conflicts.",
+            )
+        self.notify(f"[warning] {summary}; asking an Implementer to resolve it")
+        try:
+            await self.runtime.invoke(
+                Role.IMPLEMENTER,
+                run_id=run.id,
+                prompt=payloads.conflict_prompt(run, into, ref, files, reports),
+                cwd=path,
+                cycle=run.correction_cycle,
+            )
+        except CrewError as exc:
+            wt.merge_abort()
+            raise MergeConflictError(f"{summary}; the resolver failed: {exc.message}") from exc
+        remaining = wt.files_with_conflict_markers(files)
+        if remaining:
+            wt.merge_abort()
+            raise MergeConflictError(
+                f"{summary}; conflict markers remain in: {', '.join(remaining)}"
+            )
+        head = wt.conclude_merge(files)
+        self.store.add_event(
+            run.id, "merge_conflict_resolved", f"{ref} into {into} ({(head or '')[:10]})"
+        )
+        self.notify(f"Conflict resolved: {ref} into {into}")
 
     async def _verify(self, run: Run, cwd: Any) -> None:
         execution = self.config.execution
@@ -949,6 +1028,12 @@ class Orchestrator:
                 "",
                 f"- Branch: `{t.branch}`  Commit: `{(t.commit_sha or '-')[:12]}`",
                 f"- Changed files: {', '.join(t.changed_files) or '-'}",
+                *(
+                    [f"- Outside the plan: {', '.join(extra)}"]
+                    if t.expected_files
+                    and (extra := sorted(set(t.changed_files) - set(t.expected_files)))
+                    else []
+                ),
                 f"- Summary (implementer claim): {report.get('summary', '-')}",
             ]
             for v in report.get("verification", []):

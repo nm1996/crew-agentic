@@ -291,7 +291,9 @@ def test_failing_task_is_retried_then_blocks_dependents(make_orch):
     assert orch.store.get_task(run.id, "a").attempt == 2  # retried once
 
 
-def test_merge_conflict_stops_safely_and_preserves_work(make_orch, repo: Path):
+def test_merge_conflict_stops_safely_and_preserves_work(make_orch, configure_project, repo: Path):
+    project = configure_project(execution={"conflict_resolution": "fail"})
+
     def implementer(req: AgentRequest) -> dict:
         (req.cwd / "app.py").write_text(f"conflicting change from {req.task_key}\n")
         return {"summary": "edited app.py", "changed_files": ["app.py"]}
@@ -299,10 +301,10 @@ def test_merge_conflict_stops_safely_and_preserves_work(make_orch, repo: Path):
     fake = FakeProvider()
     fake.on(Role.DIRECTOR, plan_with(("a", []), ("b", [])))
     fake.on(Role.IMPLEMENTER, implementer)
-    orch = make_orch(provider=fake)
+    orch = make_orch(project, fake)
     run = orch.approve_plan(orch.start_run("x").id)
     assert run.state == RunState.FAILED
-    assert "merge conflict" in run.failure_reason and "app.py" in run.failure_reason
+    assert "conflicted in: app.py" in run.failure_reason
     assert (repo / "app.py").read_text() == "def hello():\n    return 'hi'\n"
     for key in ("a", "b"):
         task = orch.store.get_task(run.id, key)
@@ -334,7 +336,7 @@ def test_interrupted_run_resumes_with_fresh_attempt(make_orch, fake):
     )
     ws = orch.p.workspace
     ws.ensure_integration_worktree(run.id, run.base_commit)
-    stale, _ = ws.create_task_worktree(run.id, "part-a", 1, ws.integration_branch(run.id), [])
+    stale, _ = ws.create_task_worktree(run.id, "part-a", 1, ws.integration_branch(run.id))
     (stale / "partial.txt").write_text("half-done work")
 
     run = make_orch().resume(run.id)
@@ -658,3 +660,65 @@ def test_summary_review_context_keeps_prompts_small(make_orch, configure_project
         assert "## Changed files" in prompt and "- big.txt" in prompt
         assert "open the changed files with your Read tool" in prompt
         assert len(prompt) < 30_000  # the full diff alone would be > 120 kB
+
+
+def _same_change_with_different_comments(req: AgentRequest) -> dict:
+    """Parallel tasks making the same edit differently: the reference-run failure."""
+    if "Resolve a merge conflict" in req.prompt:
+        text = (req.cwd / "app.py").read_text()
+        resolved = [ln for ln in text.splitlines() if not ln.startswith(("<<<<<<<", ">>>>>>>"))]
+        resolved = [ln for ln in resolved if ln != "=======" and "# from b" not in ln]
+        (req.cwd / "app.py").write_text("\n".join(resolved) + "\n")
+        return {"summary": "kept the plugin once"}
+    if req.task_key in ("a", "b"):
+        with (req.cwd / "app.py").open("a") as fh:
+            fh.write(f"# from {req.task_key}\nPLUGIN = 'failsafe'\n")
+    return default_implementer(req)
+
+
+def test_dependency_conflict_is_resolved_by_an_agent(make_orch):
+    fake = FakeProvider()
+    fake.on(Role.DIRECTOR, plan_with(("a", []), ("b", []), ("c", ["a", "b"])))
+    fake.on(Role.IMPLEMENTER, _same_change_with_different_comments)
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL, run.failure_reason
+    events = [e.type for e in orch.store.events(run.id)]
+    assert "merge_conflict" in events and "merge_conflict_resolved" in events
+    content = git(orch.p.paths.root, "show", f"{run.integration_branch}:app.py")
+    assert content.count("PLUGIN = 'failsafe'") == 1 and "<<<<<<<" not in content
+
+
+def test_unresolved_conflict_fails_without_retry(make_orch):
+    def stubborn(req: AgentRequest) -> dict:
+        if "Resolve a merge conflict" in req.prompt:
+            return {"summary": "did nothing"}  # markers remain
+        return _same_change_with_different_comments(req)
+
+    fake = FakeProvider()
+    fake.on(Role.DIRECTOR, plan_with(("a", []), ("b", []), ("c", ["a", "b"])))
+    fake.on(Role.IMPLEMENTER, stubborn)
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.FAILED
+    assert "conflict markers remain in: app.py" in run.failure_reason
+    assert orch.store.get_task(run.id, "c").attempt == 1  # deterministic: not retried
+
+
+def test_changes_outside_the_plan_are_reported(make_orch):
+    def implementer(req: AgentRequest) -> dict:
+        (req.cwd / "pom.xml").write_text(f"<project>{req.task_key}</project>")
+        return default_implementer(req)
+
+    fake = FakeProvider().on(Role.IMPLEMENTER, implementer)
+    fake.on(
+        Role.DIRECTOR, lambda r: {**default_director(r), "tasks": default_director(r)["tasks"][:1]}
+    )
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    expanded = [e for e in orch.store.events(run.id) if e.type == "scope_expanded"]
+    assert expanded and "pom.xml" in expanded[0].message
+    assert (
+        "Outside the plan: pom.xml"
+        in (orch.p.paths.run_dir(run.id) / "implementation.md").read_text()
+    )

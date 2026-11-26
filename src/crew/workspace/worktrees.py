@@ -99,17 +99,13 @@ class WorkspaceManager:
         return path
 
     def create_task_worktree(
-        self,
-        run_id: str,
-        task_id: str,
-        attempt: int,
-        start_point: str,
-        dependency_branches: list[str],
+        self, run_id: str, task_id: str, attempt: int, start_point: str
     ) -> tuple[Path, str]:
-        """Create a fresh worktree for one task attempt and merge its dependencies in.
+        """Create a fresh worktree and branch for one task attempt.
 
-        Raises :class:`PreconditionError` when the slot already exists (a previous
-        attempt is preserved, never reused) or dependency branches conflict.
+        Raises :class:`PreconditionError` when the slot already exists: a previous
+        attempt is preserved, never reused. Dependencies are merged separately
+        (:meth:`merge_dependency`) so conflicts can be resolved by an agent.
         """
         path = self.task_path(run_id, task_id, attempt)
         branch = self.task_branch(run_id, task_id, attempt)
@@ -117,18 +113,19 @@ class WorkspaceManager:
             raise PreconditionError(f"worktree slot {path} or branch {branch} already exists")
         path.parent.mkdir(parents=True, exist_ok=True)
         self.git.worktree_add(path, branch, start_point)
-        wt = self.git.at(path)
-        for dep_branch in dependency_branches:
-            if wt.is_ancestor(dep_branch, "HEAD"):
-                continue
-            if not wt.merge_no_ff(dep_branch, f"crew: bring in dependency {dep_branch}"):
-                files = wt.conflicted_files()
-                wt.merge_abort()
-                raise PreconditionError(
-                    f"dependency branches for task {task_id} conflict in: {', '.join(files)}",
-                    hint=f"Inspect {path} and the dependency branches.",
-                )
         return path, branch
+
+    def merge_into(self, path: Path, ref: str, message: str) -> list[str]:
+        """Merge ``ref`` into the worktree at ``path``.
+
+        Returns ``[]`` on success (or if already merged). On conflict the merge is
+        left *in progress* and the conflicted files are returned; the caller must
+        resolve and conclude it, or abort it.
+        """
+        wt = self.git.at(path)
+        if wt.is_ancestor(ref, "HEAD") or wt.merge_no_ff(ref, message):
+            return []
+        return wt.conflicted_files()
 
     def remove_worktree_if_clean(self, path: Path) -> bool:
         """Remove a CREW worktree only if Git agrees it holds no uncommitted changes."""

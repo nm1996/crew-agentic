@@ -117,6 +117,9 @@ class ExecutionSettings(_Strict):
     # Each entry is a string (split like a shell, never run by one) or an
     # explicit argv list such as ["python", "-m", "pytest"] (most portable).
     verification_commands: list[str | list[str]] = Field(default_factory=list)
+    # What to do when merging task branches conflicts: "agent" asks an Implementer
+    # to resolve the conflict markers (CREW verifies and commits); "fail" stops.
+    conflict_resolution: Literal["agent", "fail"] = "agent"
     # How much of the integrated diff Reviewer and Evaluator get in their prompt:
     # "full" embeds the whole diff; "summary" embeds stats, the file list and the
     # first part of the patch, and they open files with their Read tool.

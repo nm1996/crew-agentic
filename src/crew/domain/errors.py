@@ -69,3 +69,9 @@ class BudgetExceededError(CrewError):
     """The run's spending limit (execution.max_run_budget_usd) is used up."""
 
     exit_code = 11
+
+
+class MergeConflictError(CrewError):
+    """A merge conflicted and could not be resolved (retrying would not help)."""
+
+    exit_code = 12

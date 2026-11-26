@@ -177,6 +177,36 @@ def reviewer_prompt(
     return "\n".join(parts)
 
 
+def conflict_prompt(
+    run: Run, into: str, ref: str, files: list[str], reports: dict[str, Any]
+) -> str:
+    return "\n".join(
+        [
+            "# Resolve a merge conflict",
+            "",
+            f"CREW merged `{ref}` into {into} in this worktree and Git stopped with",
+            "conflicts. Edit the files below so that every conflict is resolved:",
+            "",
+            *[f"- {f}" for f in files],
+            "",
+            "Rules:",
+            "- Remove every `<<<<<<<`, `=======` and `>>>>>>>` marker.",
+            "- Keep the intent of both sides. If both sides made the same change, keep it once.",
+            "- Do not change any other file and do not refactor. CREW commits the result.",
+            "",
+            "# Original request",
+            "",
+            run.request,
+            "",
+            "# What each side was doing (task reports)",
+            "",
+            "```json",
+            _json(reports),
+            "```",
+        ]
+    )
+
+
 def correction_description(findings: list[dict[str, Any]]) -> str:
     lines = ["Fix the following blocking review findings in the integrated change:", ""]
     for i, f in enumerate(findings, 1):

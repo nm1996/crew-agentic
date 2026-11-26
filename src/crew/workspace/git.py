@@ -271,6 +271,27 @@ class Git:
     def merge_abort(self) -> None:
         self.run("merge", "--abort")
 
+    def files_with_conflict_markers(self, files: list[str]) -> list[str]:
+        """Files that still contain merge conflict markers."""
+        remaining = []
+        for name in files:
+            path = self.cwd / name
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if any(
+                line.startswith(("<<<<<<< ", ">>>>>>> ")) or line.rstrip() == "======="
+                for line in text.splitlines()
+            ):
+                remaining.append(name)
+        return remaining
+
+    def conclude_merge(self, files: list[str]) -> str | None:
+        """Stage resolved files and create the merge commit. Returns the new HEAD."""
+        self.run("add", "--", *files)
+        self.run(*CREW_IDENTITY, "commit", "--quiet", "--no-verify", "--no-edit")
+        return self.head()
+
     def delete_owned_branch(self, name: str, owned_prefix: str) -> None:
         """Delete a CREW branch. Only names under ``owned_prefix`` are accepted.
 
