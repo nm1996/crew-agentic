@@ -124,6 +124,8 @@ def _after_drive(run: Run) -> None:
     elif run.failure_reason:
         console.print(f"[red]Reason:[/] {run.failure_reason}")
     if state is RunState.FAILED:
+        if run.failed_state:
+            console.print(f"Fix the cause, then retry from {run.failed_state}: crew retry {run.id}")
         raise typer.Exit(1)
 
 
@@ -258,6 +260,13 @@ def reject(run_id: RunIdArg, note: NoteOpt = None) -> None:
 def resume(run_id: RunIdArg) -> None:
     """Resume an interrupted run after re-validating repository and worktree state."""
     _after_drive(make_orchestrator(open_project(), _notify).resume(run_id))
+
+
+@app.command()
+@handle_errors
+def retry(run_id: RunIdArg, note: NoteOpt = None) -> None:
+    """Retry a FAILED run from the stage it failed in (failed tasks get fresh attempts)."""
+    _after_drive(make_orchestrator(open_project(), _notify).retry(run_id, note))
 
 
 @app.command()

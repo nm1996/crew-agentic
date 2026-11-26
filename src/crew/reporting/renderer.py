@@ -252,6 +252,13 @@ def render_final_report(store: Store, run: Run) -> str:
             f"git merge --no-ff {run.integration_branch}",
             "```",
         ]
+    elif state is RunState.FAILED and run.failed_state:
+        lines += [
+            f"The run failed during {run.failed_state}. After fixing the cause, retry from "
+            f"there with `crew retry {run.id}`.",
+            "",
+            f"Worktrees and branches were preserved under `.crew/worktrees/{run.id}/`.",
+        ]
     elif state in (RunState.FAILED, RunState.CANCELLED):
         lines.append(
             "Worktrees and branches were preserved for inspection under `.crew/worktrees/"

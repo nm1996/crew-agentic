@@ -6,6 +6,8 @@ same transaction that writes the new state, so illegal transitions never persist
 Representation choices (documented in docs/WORKFLOW.md):
 * A rejected plan ends in ``PLAN_REJECTED`` (terminal), not ``CANCELLED``.
 * A rejected final result ends in ``REJECTED`` (terminal).
+* ``FAILED`` is terminal for the engine, but the developer may retry it from
+  the stage it failed in (``crew retry``).
 """
 
 from __future__ import annotations
@@ -28,13 +30,34 @@ _FORWARD: dict[RunState, frozenset[RunState]] = {
     S.AWAITING_FINAL_APPROVAL: frozenset({S.COMPLETED, S.REJECTED}),
 }
 
+# Stages a FAILED run may be retried from (only via `crew retry`, recorded as an
+# approval). FAILED is still terminal for the engine: it never leaves it alone.
+RETRY_TARGETS: frozenset[RunState] = frozenset(
+    {
+        S.ANALYZING,
+        S.PLANNING,
+        S.IMPLEMENTING,
+        S.INTEGRATING,
+        S.REVIEWING,
+        S.CHANGES_REQUESTED,
+        S.EXTERNAL_EVALUATION,
+    }
+)
+
 # Any non-terminal state may fail or be cancelled.
 TRANSITIONS: dict[RunState, frozenset[RunState]] = {
     state: (_FORWARD.get(state, frozenset()) | {S.FAILED, S.CANCELLED})
     if state not in TERMINAL_STATES
-    else frozenset()
+    else (RETRY_TARGETS if state is S.FAILED else frozenset())
     for state in RunState
 }
+
+
+def retry_target(failed_state: RunState | None) -> RunState | None:
+    """Stage to retry a run from, given the stage it failed in."""
+    if failed_state is S.CREATED:
+        return S.ANALYZING
+    return failed_state if failed_state in RETRY_TARGETS else None
 
 
 def can_transition(from_state: RunState, to_state: RunState) -> bool:

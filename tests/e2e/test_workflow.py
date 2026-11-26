@@ -522,3 +522,43 @@ def test_unlimited_budget_by_default(make_orch):
     run = orch.approve_plan(orch.start_run("x").id)
     assert run.state == RunState.AWAITING_FINAL_APPROVAL
     assert orch.store.run_cost(run.id) == pytest.approx(5.0 * len(fake.calls))
+
+
+def test_failed_run_can_be_retried_after_fixing_the_cause(make_orch):
+    broken = {"on": True}
+
+    def implementer(req: AgentRequest) -> dict:
+        if broken["on"] and req.task_key == "part-b":
+            return {"summary": ""}  # invalid output: a "provider problem"
+        return default_implementer(req)
+
+    fake = FakeProvider().on(Role.IMPLEMENTER, implementer)
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.FAILED and run.failed_state == RunState.IMPLEMENTING
+
+    broken["on"] = False
+    run = orch.retry(run.id, "provider fixed")
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL
+    part_b = orch.store.get_task(run.id, "part-b")
+    assert part_b.status == TaskStatus.COMPLETED and part_b.attempt == 3  # fresh attempt
+    assert orch.store.get_task(run.id, "part-a").attempt == 1  # completed work kept
+    kinds = [a.kind for a in orch.store.approvals(run.id)]
+    assert kinds == ["PLAN", "RETRY"]
+
+
+def test_retry_after_budget_increase(make_orch, configure_project):
+    project = configure_project(execution={"max_run_budget_usd": 0.5})
+    fake = FakeProvider(cost_per_call=0.3)
+    run = make_orch(project, fake).approve_plan(make_orch(project, fake).start_run("x").id)
+    assert run.state == RunState.FAILED
+    bigger = configure_project(execution={"max_run_budget_usd": 100.0})
+    run = make_orch(bigger, fake).retry(run.id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL
+
+
+def test_only_failed_runs_can_be_retried(make_orch):
+    orch = make_orch()
+    run = orch.start_run("x")
+    with pytest.raises(InvalidTransitionError):
+        orch.retry(run.id)

@@ -75,6 +75,7 @@ class ExecutionStatus(StrEnum):
 class ApprovalKind(StrEnum):
     PLAN = "PLAN"
     FINAL = "FINAL"
+    RETRY = "RETRY"  # developer asked to retry a FAILED run
 
 
 class ApprovalDecision(StrEnum):

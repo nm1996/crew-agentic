@@ -4,7 +4,12 @@ import pytest
 
 from crew.domain.enums import TERMINAL_STATES, RunState
 from crew.domain.errors import InvalidTransitionError
-from crew.orchestrator.state_machine import assert_transition, can_transition
+from crew.orchestrator.state_machine import (
+    RETRY_TARGETS,
+    assert_transition,
+    can_transition,
+    retry_target,
+)
 
 S = RunState
 
@@ -54,7 +59,16 @@ def test_any_active_state_can_fail_or_be_cancelled(state):
     assert can_transition(state, S.CANCELLED)
 
 
-@pytest.mark.parametrize("state", sorted(TERMINAL_STATES))
+@pytest.mark.parametrize("state", sorted(TERMINAL_STATES - {S.FAILED}))
 def test_terminal_states_have_no_exits(state):
     for target in RunState:
         assert not can_transition(state, target)
+
+
+def test_failed_runs_can_only_be_retried_into_working_stages():
+    for target in RunState:
+        assert can_transition(S.FAILED, target) == (target in RETRY_TARGETS)
+    for gate in (S.AWAITING_PLAN_APPROVAL, S.AWAITING_FINAL_APPROVAL, S.COMPLETED):
+        assert gate not in RETRY_TARGETS  # retry can never skip a developer gate
+    assert retry_target(S.CREATED) is S.ANALYZING
+    assert retry_target(S.AWAITING_PLAN_APPROVAL) is None

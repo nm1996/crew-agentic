@@ -53,7 +53,7 @@ from crew.domain.task_graph import (
 )
 from crew.orchestrator import recovery
 from crew.orchestrator.lock import RunLock
-from crew.orchestrator.state_machine import is_terminal
+from crew.orchestrator.state_machine import is_terminal, retry_target
 from crew.persistence.models import JsonMixin, Run, Task, utcnow
 from crew.persistence.store import Store
 from crew.providers.base import AgentProvider
@@ -212,6 +212,41 @@ class Orchestrator:
         self.store.request_cancel(run_id)
         return self.store.get_run(run_id), False
 
+    def retry(self, run_id: str, note: str | None = None) -> Run:
+        """Retry a FAILED run from the stage it failed in.
+
+        Failed, blocked and cancelled tasks of the current cycle get fresh
+        attempts (in new worktrees; old ones are preserved). Useful after
+        transient provider errors, timeouts or an exhausted budget.
+        """
+        with self._lock(run_id):
+            run = self._require_state(run_id, RunState.FAILED)
+            failed = RunState(run.failed_state) if run.failed_state else None
+            target = retry_target(failed)
+            if target is None:
+                raise InvalidTransitionError(
+                    f"Run {run_id} cannot be retried: the failed stage was not recorded.",
+                    hint="Start a new run with `crew run`.",
+                )
+            for note_line in recovery.reconcile_processes(self.p, run):
+                self.notify(f"[recovery] {note_line}")
+            retryable = (TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED)
+            for task in self.store.tasks(run_id, cycle=run.correction_cycle):
+                if task.status in retryable:
+                    self.store.set_task_status(
+                        task, TaskStatus.PENDING, "reset for retry", failures=0, finished_at=None
+                    )
+            self.store.add_approval(run_id, ApprovalKind.RETRY, ApprovalDecision.APPROVED, note)
+            self._transition(
+                run_id,
+                target,
+                f"retry requested by developer (from {failed})",
+                failure_reason=None,
+                failed_state=None,
+                cancel_requested=False,
+            )
+            return self._drive_locked(run_id)
+
     def resume(self, run_id: str) -> Run:
         with self._lock(run_id):
             run = self.store.get_run(run_id)
@@ -291,12 +326,7 @@ class Orchestrator:
     def _plan(self, run: Run) -> None:
         context_file = self._run_dir(run) / "context.md"
         if not context_file.exists():  # e.g. deleted between crash and resume
-            self._transition(
-                run.id,
-                RunState.FAILED,
-                "context artifact missing",
-                failure_reason="context artifact missing; start a new run",
-            )
+            self._fail(run.id, "context artifact missing", retry_from=RunState.ANALYZING)
             return
         context_md = context_file.read_text(encoding="utf-8")
         director_wt = self.p.workspace.ensure_director_worktree(run.id, run.base_commit)
@@ -743,8 +773,9 @@ class Orchestrator:
         self.notify(f"→ {to}" + (f": {message}" if message else ""))
         return run
 
-    def _fail(self, run_id: str, reason: str) -> None:
-        self._transition(run_id, RunState.FAILED, reason, failure_reason=reason)
+    def _fail(self, run_id: str, reason: str, *, retry_from: RunState | None = None) -> None:
+        state = retry_from or RunState(self.store.get_run(run_id).state)
+        self._transition(run_id, RunState.FAILED, reason, failure_reason=reason, failed_state=state)
         self._cleanup_after_failure(run_id)
 
     def _cancel(self, run_id: str) -> None:
