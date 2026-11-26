@@ -46,7 +46,12 @@ run passes on Linux.
 | Scoped shell rules verified against the real CLI; opt-in smoke workflow on all OSes | Done (Linux verified; Windows/macOS need the API-key secret) | D20 |
 | Tag-driven GitHub releases | Done | Releases |
 
-## M9 — Interactive permissions and integration adapters
+## M9 — Interactive permissions and integration adapters (0.5.0, done)
+
+Status: permission prompts (D24) and adapters for Jira, GitHub, Confluence and a
+Markdown folder (D23) are implemented, with `crew run --issue/--doc/--pr-comments` and
+`crew publish`. Adapters are verified against fakes; GitLab and inline review comments are
+still open. The design notes below are kept for reference.
 
 Goal: CREW works with the systems around the code (issue tracker, code host, review,
 documentation) through small, explicit adapters, and an agent that lacks a permission

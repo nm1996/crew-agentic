@@ -53,6 +53,9 @@ git merge --no-ff crew/<run-id>/integration   # you merge, when you choose to
 
 Try it offline with the deterministic fake provider: `crew init --provider fake`.
 
+Working with Jira, GitHub or Confluence? `crew run --issue PROJ-123`, then
+`crew publish <run-id> --pr` — see [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
+
 ## Documentation
 
 | Document | Contents |
@@ -60,6 +63,7 @@ Try it offline with the deterministic fake provider: `crew init --provider fake`
 | [docs/INSTALLATION.md](docs/INSTALLATION.md) | Installing CREW, prerequisites, troubleshooting |
 | [docs/USAGE.md](docs/USAGE.md) | Walkthrough, every command, exit codes, recovery |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | `.crew/config.yaml` reference and hard limits |
+| [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Jira, GitHub, Confluence: start runs from issues, publish PRs and reports |
 | [docs/examples/](docs/examples/README.md) | Measured real runs with cost breakdown (e.g. Spring Boot CRUD: $3.34, 14 min) |
 | [docs/README.md](docs/README.md) | Index of all specs: product, architecture, workflow, roles, security, technical spec, decisions, roadmap |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, conventions, tests |

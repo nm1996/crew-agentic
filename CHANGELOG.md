@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-26
+
+Integrations and interactive permissions (M9).
+
+### Added
+- Integration adapters: Jira Cloud (issues, comments, transitions), GitHub (PRs, reviews,
+  review comments), Confluence Cloud and a Markdown folder (context pages, report pages).
+- `crew run --issue KEY`, `--doc REF` (repeatable) and `--pr-comments N`.
+- `crew publish <run> [--pr --draft --review --docs --no-issue --yes]` for COMPLETED runs;
+  the only push CREW performs, limited to the run's integration branch.
+- `approvals.permission_prompts: ask`: agents can ask for permissions outside their
+  rules through CREW's MCP approval tool; destructive and network commands are always
+  denied; answers are recorded.
+- `crew doctor` checks configured integrations and credential variables.
+- docs/INTEGRATIONS.md; decisions D23–D24; exit code 13 (integration error).
+
 ## [0.4.0] - 2026-11-26
 
 Cost controls and robustness, driven by a measured reference run (Spring Boot CRUD).

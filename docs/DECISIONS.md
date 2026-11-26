@@ -282,6 +282,39 @@ per task. Controls added in 0.4.0:
   a pointer to `crew retry` after the reset.
 - Reported costs are API-list equivalents; on a subscription they are informational.
 
+## D23. Integration adapters
+
+- Three small protocols (`IssueTracker`, `CodeHost`, `DocsTarget`) next to
+  `AgentProvider`; first adapters: Jira Cloud, GitHub, Confluence Cloud, and a Markdown
+  folder that needs no credentials. A standard-library HTTP client with an injectable
+  transport keeps adapters dependency-free and testable without network.
+- Reads are explicit `crew run` options; writes happen only in `crew publish` for
+  COMPLETED runs, after confirmation, and are recorded as events plus a `PUBLISH`
+  approval. "Never push automatically" still holds: the only push is the developer's
+  `crew publish --pr`, limited to the run's integration branch and never forced.
+- Credentials are environment variables named in the config (GitHub falls back to
+  `gh auth token`); they are never persisted. Integration URLs must be HTTPS.
+- Rich-text formats are converted with small purpose-built converters (ADF for Jira,
+  storage XHTML for Confluence) rather than new dependencies.
+- Not yet: GitLab/Bitbucket, Jira Server/Data Center, inline PR review comments (the
+  review is posted as one body to avoid position errors). Verified with fakes only; the
+  real services have not been called because no credentials were available.
+
+## D24. Permission prompts
+
+- `approvals.permission_prompts: ask` passes CREW's MCP server to Claude Code as
+  `--permission-prompt-tool mcp__crew__approve` (with `--permission-prompts host` and
+  `--mcp-config`; `--strict-mcp-config` keeps every other server out). The flag is not
+  listed in `claude --help` but is referenced by `--permission-prompts`; it was verified
+  against CLI 2.1.319 by an opt-in smoke test.
+- The server classifies shell requests with the execution policy (operators split even
+  when glued to words) and denies DESTRUCTIVE/NETWORK without asking. Other requests are
+  written to `.crew/runs/<id>/permissions/` and answered by the driver process, which asks
+  the developer in a daemon thread (an unanswered prompt cannot block CREW from exiting).
+- In ask mode Implementers and the Reviewer get the shell tool available but not
+  pre-approved; Director and Evaluator stay read-only.
+- Default `off`: unchanged behaviour (deny silently), suitable for unattended runs.
+
 ## Releases
 
 Version tags `vX.Y.Z` trigger `.github/workflows/release.yml`: the tag must equal the
@@ -307,3 +340,4 @@ and the matching `CHANGELOG.md` section.
   the `Claude smoke` workflow, which only runs when you provide an API key; it has been
   verified on Linux.
 - One real provider (Claude Code CLI). The provider interface is ready for others.
+- Integration adapters are tested against fake services only (D23).

@@ -44,7 +44,8 @@ git merge --no-ff crew/<id>/integration   # CREW never merges for you
 | `crew init [--name N] [--provider claude_code\|fake]` | Create `.crew/` in the current repository. Idempotent, never overwrites. |
 | `crew doctor` | Diagnose Python, Git, repository, config, database and Claude CLI. Exit 1 on any FAIL. |
 | `crew configure [key=value ...]` | Show config, or set dotted keys (validated before writing). Values are YAML: `2`, `true`, `["a", "b"]`. |
-| `crew run "<request>"` | Create a run, analyse, plan, stop at the plan gate. |
+| `crew run ["<request>"] [--issue KEY] [--doc REF]… [--pr-comments N]` | Create a run (from text, an issue or PR review comments, with linked docs), analyse, plan, stop at the plan gate. |
+| `crew publish <id> [--pr] [--draft] [--review] [--docs] [--no-issue] [--yes]` | Share a COMPLETED run: PR, review, issue comment/transition, report page. See [INTEGRATIONS.md](INTEGRATIONS.md). |
 | `crew plan <id>` | Show the plan. |
 | `crew approve-plan <id> [-m note] [--no-continue]` | Approve and execute through to the final gate (`--no-continue`: record approval only, continue with `resume`). |
 | `crew reject-plan <id> [-m note]` | End the run as `PLAN_REJECTED`. |
@@ -77,6 +78,7 @@ git merge --no-ff crew/<id>/integration   # CREW never merges for you
 | 10 | Invalid plan. |
 | 11 | Run budget exhausted (`execution.max_run_budget_usd`). |
 | 12 | Unresolvable merge conflict. |
+| 13 | Integration error (missing credentials, HTTP error from Jira/GitHub/Confluence). |
 | 130 | Interrupted (Ctrl-C); state preserved for `crew resume`. |
 
 ## Run states

@@ -41,6 +41,9 @@ git:
 approvals:
   require_plan_approval: true   # cannot be disabled
   require_final_approval: true  # cannot be disabled
+  permission_prompts: off       # off | ask — ask the developer when an agent needs more
+  permission_timeout_seconds: 300
+integrations: {}                # Jira, GitHub, Confluence / folder — see INTEGRATIONS.md
 context:
   max_files_listed: 400         # file list size given to the Director
   exclude: []                   # extra globs never listed and never readable by agents
@@ -173,6 +176,34 @@ agent execution gets the remaining budget as its `--max-budget-usd` (split betwe
 concurrent Implementers). When it is used up, no further agent starts and the run fails
 with exit code 11; raise the limit and `crew retry <run-id>`. `crew status` shows the cost
 so far.
+
+## Asking for permissions
+
+By default an agent that tries something outside its rules is simply denied and has to
+work around it. With
+
+```bash
+crew configure approvals.permission_prompts=ask
+```
+
+Implementers and the Reviewer get the shell tool *available but not pre-approved*. Each
+command outside their rules is shown to you in the terminal running CREW:
+
+```text
+Permission request from the implementer (verification):
+  Bash: mvn -q dependency:tree
+  Allow? [y]es once / [a]lways in this run / [N]o:
+```
+
+- Destructive and network commands (`rm`, `sudo`, `curl`, `git push`, …, also inside
+  compound commands) are denied without asking.
+- "always in this run" allows that exact command again for the rest of the run.
+- Without a terminal (CI, background) or after `permission_timeout_seconds`, the answer
+  is no.
+- Every answer is recorded as a `PERMISSION` approval in the run's history and report.
+
+Under the hood this is CREW's own MCP tool passed to Claude Code as its permission-prompt
+tool; it is the only MCP server agents get.
 
 ## Project notes for the Director
 
