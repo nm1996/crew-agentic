@@ -109,6 +109,11 @@ class AgentRuntime:
             status = ExecutionStatus.TIMED_OUT if exc.kind == "timeout" else ExecutionStatus.FAILED
             self.store.finish_execution(execution_id, status=status, error=redact(exc.message))
             raise
+        except Exception as exc:  # OSError from spawning, bugs in an adapter, ...
+            self.store.finish_execution(
+                execution_id, status=ExecutionStatus.FAILED, error=f"provider crashed: {exc!r}"
+            )
+            raise ProviderError(f"provider crashed: {exc!r}", kind="internal") from exc
 
         try:
             model = CONTRACTS[role].model_validate(result.output)

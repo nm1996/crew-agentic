@@ -227,7 +227,8 @@ class Store:
     ) -> Task:
         with self.session() as s:
             row = s.get(Task, task.pk)
-            assert row is not None
+            if row is None:
+                raise NotFoundError("record disappeared during update")
             previous = row.status
             row.status = status
             for key, value in _sanitize(fields).items():
@@ -267,7 +268,8 @@ class Store:
             if result.rowcount != 1:  # type: ignore[attr-defined]
                 return None
             row = s.get(Task, task.pk)
-            assert row is not None
+            if row is None:
+                raise NotFoundError("record disappeared during update")
             s.refresh(row)
             s.add(
                 WorkflowEvent(
@@ -321,7 +323,8 @@ class Store:
     def finish_execution(self, execution_id: str, **fields: Any) -> None:
         with self.session() as s:
             row = s.get(AgentExecution, execution_id)
-            assert row is not None
+            if row is None:
+                raise NotFoundError("record disappeared during update")
             row.finished_at = utcnow()
             for key, value in _sanitize(fields).items():
                 setattr(row, key, value)

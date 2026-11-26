@@ -130,6 +130,10 @@ class CommandResult:
         return self.exit_code == 0 and not self.timed_out
 
 
+# Conventional "command not found / not executable" status used when spawning fails.
+SPAWN_FAILED_EXIT_CODE = 127
+
+
 def _minimal_env() -> dict[str, str]:
     # Pass a small allow-list rather than the full environment, so verification
     # commands do not inherit unrelated secrets. Project tools that need more can
@@ -167,15 +171,28 @@ async def run_command(
     """Run ``argv`` without a shell in its own process group."""
     category = classify_command(argv)
     started = time.monotonic()
-    proc = await asyncio.create_subprocess_exec(
-        *argv,
-        cwd=str(cwd),
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env if env is not None else _minimal_env(),
-        **spawn_kwargs(),
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            cwd=str(cwd),
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env if env is not None else _minimal_env(),
+            **spawn_kwargs(),
+        )
+    except OSError as exc:  # missing tool, permission denied, ...: record, don't crash the run
+        return CommandResult(
+            argv=redact_args(argv),
+            cwd=str(cwd),
+            category=category,
+            exit_code=SPAWN_FAILED_EXIT_CODE,
+            stdout="",
+            stderr=redact(f"could not start command: {exc}"),
+            duration_seconds=round(time.monotonic() - started, 3),
+            timed_out=False,
+            truncated=False,
+        )
     timed_out = False
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)

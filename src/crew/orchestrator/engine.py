@@ -66,6 +66,12 @@ class RunCancelled(Exception):
     """Raised inside a stage when the developer requested cancellation."""
 
 
+def _expect[M](value: object, cls: type[M]) -> M:
+    if not isinstance(value, cls):
+        raise CrewError(f"expected {cls.__name__} from agent runtime, got {type(value).__name__}")
+    return value
+
+
 @dataclass
 class Project:
     """Everything a use case needs about one CREW-initialised repository."""
@@ -291,7 +297,7 @@ class Orchestrator:
                 payloads.director_prompt(run, context_md, error),
                 director_wt,
             )
-            assert isinstance(plan, DirectorPlan)
+            plan = _expect(plan, DirectorPlan)
             try:
                 order = validate_graph([Node(t.id, tuple(t.dependencies)) for t in plan.tasks])
                 break
@@ -429,12 +435,13 @@ class Orchestrator:
                 task=task,
                 execution_id=execution_id,
             )
-            assert isinstance(report, ImplementationReport)
+            report = _expect(report, ImplementationReport)
             if wt.current_branch() != branch:
                 raise PreconditionError(f"agent left branch {branch}; refusing to record result")
             sha = wt.commit_all(f"crew({task.key}): {task.title}\n\nCREW run {run.id}")
             head = wt.head()
-            assert head and start_commit
+            if not head or not start_commit:
+                raise CrewError(f"could not determine commits for task {task.key}")
             changed = wt.changed_files(start_commit, head)
             if not changed:
                 self.store.add_event(
@@ -477,6 +484,17 @@ class Orchestrator:
                 finished_at=None if retry else utcnow(),
             )
             self.notify(f"[warning] task {task.key} attempt {task.attempt} failed: {exc.message}")
+        except Exception as exc:  # a bug or OS error: fail this task, keep the others running
+            log.exception("unexpected error in task %s", task.key)
+            self.store.set_task_status(
+                task,
+                TaskStatus.FAILED,
+                f"unexpected error: {exc!r}",
+                failures=task.failures + 1,
+                failure_reason=f"unexpected error: {exc!r}",
+                finished_at=utcnow(),
+            )
+            self.notify(f"[warning] task {task.key} failed unexpectedly: {exc!r}")
 
     # ---- integration, review, evaluation ---------------------------------
 
@@ -494,7 +512,8 @@ class Orchestrator:
             task = tasks[key]
             if task.integrated or task.status != TaskStatus.COMPLETED:
                 continue
-            assert task.branch and task.commit_sha
+            if not task.branch or not task.commit_sha:
+                raise CrewError(f"task {task.key} is COMPLETED but has no branch/commit recorded")
             if not igit.is_ancestor(task.commit_sha, "HEAD") and not igit.merge_no_ff(
                 task.branch, f"crew: integrate {task.key} — {task.title}"
             ):
@@ -572,7 +591,7 @@ class Orchestrator:
             ),
             self.p.workspace.integration_path(run.id),
         )
-        assert isinstance(review, ReviewReport)
+        review = _expect(review, ReviewReport)
         self._write_review_artifact(run)
         blocking = review.blocking_findings
         if not blocking:
@@ -638,7 +657,7 @@ class Orchestrator:
             ),
             self.p.workspace.integration_path(run.id),
         )
-        assert isinstance(evaluation, EvaluationReport)
+        evaluation = _expect(evaluation, EvaluationReport)
         renderer.write_artifact(
             self.store,
             self._run_dir(run),

@@ -94,3 +94,11 @@ async def test_run_command_does_not_leak_environment(tmp_path, monkeypatch):
         output_limit_bytes=1000,
     )
     assert "do-not-leak" not in result.stdout
+
+
+async def test_missing_command_is_recorded_not_raised(tmp_path):
+    result = await run_command(
+        ["definitely-not-a-real-tool-xyz"], cwd=tmp_path, timeout_seconds=5, output_limit_bytes=100
+    )
+    assert result.exit_code == 127
+    assert "could not start command" in result.stderr

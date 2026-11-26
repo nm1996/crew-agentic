@@ -446,3 +446,22 @@ def test_stop_after_driver_died_reconciles_leftovers(make_orch):
     dead = next(e for e in orch.store.executions(run.id) if e.id == "dead-exec")
     assert dead.status == ExecutionStatus.INTERRUPTED
     assert orch.store.get_task(run.id, "part-a").status == TaskStatus.CANCELLED
+
+
+def test_unexpected_error_in_one_task_fails_it_cleanly(make_orch):
+    def implementer(req: AgentRequest) -> dict:
+        if req.task_key == "a":
+            raise OSError("disk on fire")
+        return default_implementer(req)
+
+    fake = FakeProvider()
+    fake.on(Role.DIRECTOR, plan_with(("a", []), ("b", [])))
+    fake.on(Role.IMPLEMENTER, implementer)
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.FAILED
+    statuses = {t.key: t.status for t in orch.store.tasks(run.id)}
+    assert statuses["b"] == TaskStatus.COMPLETED
+    assert statuses["a"] == TaskStatus.FAILED  # provider crash -> normal retry -> FAILED
+    executions = orch.store.executions(run.id, role=Role.IMPLEMENTER)
+    assert all(e.status != ExecutionStatus.RUNNING for e in executions)
