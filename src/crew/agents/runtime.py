@@ -19,13 +19,16 @@ from crew.agents.contracts import CONTRACTS, output_schema
 from crew.config.schema import CrewConfig
 from crew.context.collector import SECRET_GLOBS
 from crew.domain.enums import ExecutionStatus, Role
-from crew.domain.errors import ProviderError
+from crew.domain.errors import BudgetExceededError, ProviderError
 from crew.persistence.models import JsonMixin, Task
 from crew.persistence.store import Store
 from crew.providers.base import AgentProvider, AgentRequest, Capabilities
 from crew.security.redaction import redact, redact_data
 
 M = TypeVar("M", bound=BaseModel)
+
+# Below this, a Claude execution cannot do useful work; treat the budget as spent.
+MIN_EXECUTION_BUDGET_USD = 0.01
 
 
 @cache
@@ -60,6 +63,28 @@ class AgentRuntime:
         self.provider = provider
         self.config = config
 
+    def execution_budget(self, run_id: str, role: Role) -> float | None:
+        """Spending cap for the next execution, or ``None`` when unlimited.
+
+        Raises :class:`BudgetExceededError` once the run budget is used up. The
+        remaining run budget is split between concurrent Implementers so that
+        parallel executions cannot overspend it together.
+        """
+        per_call = self.config.provider.claude_code.max_budget_usd
+        run_budget = self.config.execution.max_run_budget_usd
+        if run_budget is None:
+            return per_call
+        spent = self.store.run_cost(run_id)
+        remaining = run_budget - spent
+        if remaining <= MIN_EXECUTION_BUDGET_USD:
+            raise BudgetExceededError(
+                f"run budget exhausted: ${spent:.2f} of ${run_budget:.2f} spent",
+                hint="Raise execution.max_run_budget_usd, then `crew retry <run-id>`.",
+            )
+        if role is Role.IMPLEMENTER:
+            remaining /= self.config.execution.max_implementers
+        return min(per_call, remaining) if per_call else remaining
+
     async def invoke(
         self,
         role: Role,
@@ -72,6 +97,7 @@ class AgentRuntime:
         execution_id: str | None = None,
     ) -> BaseModel:
         execution_id = execution_id or uuid.uuid4().hex[:16]
+        budget = self.execution_budget(run_id, role)
         request = AgentRequest(
             role=role,
             instructions=role_instructions(role),
@@ -82,6 +108,7 @@ class AgentRuntime:
             run_id=run_id,
             execution_id=execution_id,
             task_key=task.key if task else None,
+            max_budget_usd=budget,
         )
         self.store.start_execution(
             run_id=run_id,

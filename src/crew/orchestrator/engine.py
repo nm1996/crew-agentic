@@ -37,6 +37,7 @@ from crew.domain.enums import (
     TaskStatus,
 )
 from crew.domain.errors import (
+    BudgetExceededError,
     CrewError,
     InvalidTransitionError,
     PlanValidationError,
@@ -358,7 +359,10 @@ class Orchestrator:
             raise RunCancelled
         unfinished = [t for t in tasks if t.status != TaskStatus.COMPLETED]
         if unfinished:
-            summary = ", ".join(f"{t.key}={t.status}" for t in unfinished)
+            summary = ", ".join(
+                f"{t.key}={t.status}" + (f" ({t.failure_reason})" if t.failure_reason else "")
+                for t in unfinished
+            )
             raise CrewError(f"implementation did not complete: {summary}")
         self._write_implementation_artifact(run)
         self._transition(run.id, RunState.INTEGRATING, f"{len(tasks)} task(s) completed")
@@ -492,7 +496,9 @@ class Orchestrator:
             raise
         except CrewError as exc:
             failures = task.failures + 1
-            retry = failures < self.config.execution.max_task_attempts
+            retry = failures < self.config.execution.max_task_attempts and not isinstance(
+                exc, BudgetExceededError
+            )
             self.store.set_task_status(
                 task,
                 TaskStatus.PENDING if retry else TaskStatus.FAILED,

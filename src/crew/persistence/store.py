@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from crew.domain.enums import ExecutionStatus, RunState, TaskStatus
@@ -339,6 +339,16 @@ class Store:
             if status:
                 q = q.where(AgentExecution.status == status)
             return list(s.scalars(q.order_by(AgentExecution.started_at)))
+
+    def run_cost(self, run_id: str) -> float:
+        """Total provider-reported cost of all agent executions of a run (USD)."""
+        with self.session() as s:
+            total = s.scalar(
+                select(func.coalesce(func.sum(AgentExecution.cost_usd), 0.0)).where(
+                    AgentExecution.run_id == run_id
+                )
+            )
+            return float(total or 0.0)
 
     def latest_output(self, run_id: str, role: str, cycle: int | None = None) -> dict | None:
         rows = [

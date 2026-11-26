@@ -63,3 +63,9 @@ class ProviderError(CrewError):
 
 class PlanValidationError(CrewError):
     exit_code = 10
+
+
+class BudgetExceededError(CrewError):
+    """The run's spending limit (execution.max_run_budget_usd) is used up."""
+
+    exit_code = 11

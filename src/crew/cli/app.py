@@ -2,7 +2,8 @@
 
 Exit codes: 0 success; 1 generic CREW error; 2 configuration/not initialised;
 3 precondition; 4 invalid transition; 5 not found; 6 run locked; 7 policy
-violation; 8 git error; 9 provider error; 10 invalid plan; 130 interrupted.
+violation; 8 git error; 9 provider error; 10 invalid plan; 11 budget exhausted;
+130 interrupted.
 """
 
 from __future__ import annotations
@@ -292,6 +293,9 @@ def status(
     console.print(
         "Tasks: " + (", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "none yet")
     )
+    budget = project.config.execution.max_run_budget_usd
+    spent = project.store.run_cost(run.id)
+    console.print(f"Cost: ${spent:.4f}" + (f" of ${budget:.2f} budget" if budget else ""))
     if run.cancel_requested and RunState(run.state) not in TERMINAL_STATES:
         console.print("[yellow]Cancellation requested.[/]")
     if run.failure_reason:

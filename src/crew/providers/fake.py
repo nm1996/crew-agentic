@@ -93,6 +93,7 @@ class FakeProvider:
         }
     )
     delay_seconds: float = 0.0
+    cost_per_call: float = 0.0
     name: str = "fake"
     calls: list[AgentRequest] = field(default_factory=list)
     active: int = 0
@@ -118,6 +119,6 @@ class FakeProvider:
             result = self.handlers[request.role](request)
             if asyncio.iscoroutine(result):
                 result = await result
-            return AgentResult(output=result, raw_text="(fake)", cost_usd=0.0)
+            return AgentResult(output=result, raw_text="(fake)", cost_usd=self.cost_per_call)
         finally:
             self.active -= 1

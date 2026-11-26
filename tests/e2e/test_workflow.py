@@ -500,3 +500,25 @@ def test_worktrees_removed_on_failure_when_not_preserving(make_orch, configure_p
     assert run.state == RunState.FAILED
     leftovers = [p for p in orch.p.workspace.run_dir(run.id).iterdir() if p.is_dir()]
     assert leftovers == []  # all were clean, so all were removed
+
+
+def test_run_budget_stops_spending(make_orch, configure_project):
+    project = configure_project(execution={"max_run_budget_usd": 0.5})
+    fake = FakeProvider(cost_per_call=0.3)
+    orch = make_orch(project, fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.FAILED
+    assert "budget exhausted" in run.failure_reason
+    # Director (0.3) + one implementer (0.3) exhaust the budget; nothing else ran.
+    assert [c.role for c in fake.calls] == [Role.DIRECTOR, Role.IMPLEMENTER]
+    cap = fake.calls[1].max_budget_usd
+    assert cap is not None and cap <= 0.1 + 1e-9  # (0.5 - 0.3) split over 2 implementers
+    assert orch.store.get_task(run.id, "part-b").attempt <= 1  # budget errors are not retried
+
+
+def test_unlimited_budget_by_default(make_orch):
+    fake = FakeProvider(cost_per_call=5.0)
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL
+    assert orch.store.run_cost(run.id) == pytest.approx(5.0 * len(fake.calls))

@@ -61,6 +61,8 @@ class ExecutionSettings(_Strict):
     max_implementers: int = Field(default=2, ge=1, le=MAX_IMPLEMENTERS_HARD_LIMIT)
     max_correction_cycles: int = Field(default=2, ge=0, le=MAX_CORRECTION_CYCLES_HARD_LIMIT)
     max_task_attempts: int = Field(default=2, ge=1, le=3)
+    # Total spend limit for one run (sum of provider-reported costs). None = no limit.
+    max_run_budget_usd: float | None = Field(default=None, gt=0)
     command_timeout_seconds: int = Field(default=600, ge=5, le=3 * 3600)
     command_output_limit_bytes: int = Field(default=200_000, ge=1_000, le=5_000_000)
     preserve_worktrees_on_failure: bool = True
