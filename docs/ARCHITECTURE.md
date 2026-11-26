@@ -146,6 +146,46 @@ tests/
 
 Adjust names only when implementation reveals a concrete reason. Avoid creating empty abstraction layers.
 
+### Implemented layout
+
+The suggestion above was trimmed where a layer would have been empty:
+
+```text
+src/crew/
+  cli/app.py                  Typer commands, rendering, exit codes
+  application/project.py      open/init/configure project, provider factory, logging
+  application/doctor.py       prerequisite checks
+  domain/enums.py, errors.py  states, statuses, roles, error hierarchy (exit codes)
+  domain/task_graph.py        DAG validation, readiness/blocking rules
+  orchestrator/state_machine.py  allowed transitions (pure)
+  orchestrator/engine.py      Orchestrator: stage handlers, scheduler, gates, cancellation
+  orchestrator/recovery.py    reconciliation before resume
+  orchestrator/lock.py        per-run flock
+  agents/contracts.py         Pydantic output schemas per role
+  agents/payloads.py          per-role input prompts
+  agents/prompts/*.md         role instructions
+  agents/runtime.py           invoke provider, validate, record executions
+  providers/base.py           provider-neutral AgentRequest/AgentResult/AgentProvider
+  providers/fake.py           deterministic offline provider
+  providers/claude_code/      CLI adapter (argv, process lifecycle) and output parser
+  workspace/git.py            thin git wrapper with destructive-command guard
+  workspace/worktrees.py      CREW-owned worktree/branch layout
+  persistence/models.py       ORM models
+  persistence/store.py        data access; atomic transitions
+  persistence/database.py     engine, pragmas, programmatic Alembic
+  persistence/migrations/     Alembic environment and versions
+  context/collector.py        bounded repository context, secret exclusions
+  reporting/renderer.py       Markdown artifacts
+  config/schema.py, loader.py configuration model, hard limits, YAML I/O
+  security/redaction.py       secret redaction (+ logging filter)
+  security/execution_policy.py  command classification, guarded subprocess runner
+```
+
+The scheduler lives inside `engine.py` (`_implement_async`) because it is ~50 lines and
+tightly coupled to task execution; the pure readiness rules it uses are in
+`domain/task_graph.py`. Application use cases that drive runs are methods on
+`Orchestrator`; the CLI calls them through `application/project.py`.
+
 ## 5. Data flow
 
 1. CLI submits a user request to an application service.

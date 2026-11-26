@@ -2,6 +2,20 @@
 
 Build in vertical slices. Keep the application runnable at every milestone.
 
+## Status (v0.1.0)
+
+| Milestone | Status | Notes |
+|---|---|---|
+| M0 Foundation | Done | Package, CLI, config, `init`, `doctor`, logging, ruff, pytest. |
+| M1 Domain and persistence | Done | ORM models, Alembic `0001`, validated state machine, atomic transitions + events. |
+| M2 Provider and agent contracts | Done | Provider protocol, fake provider, Claude Code CLI adapter (flags verified), role contracts. |
+| M3 Planning and approvals | Done | Context collection with exclusions, DAG validation with one corrective retry, plan gate. |
+| M4 Worktrees and implementation | Done | Clean-tree precondition, per-task worktrees, dependency-aware scheduler (≤2), merge integration, conflict detection. |
+| M5 Review and evaluation | Done | Structured findings, bounded corrections, independent evaluator, final gate, reports. |
+| M6 Recovery and hardening | Done (MVP) | Resume/reconcile, cancellation, orphan handling, redaction tests, e2e tests, docs. Release tagging is left to the maintainer. |
+
+Next candidates (post-MVP): retrying `FAILED` runs from the failed stage, a Claude Agent SDK adapter, interactive approval prompts, cleanup command for finished runs, macOS CI.
+
 ## M0 — Foundation
 
 - Create Python package with `uv`.

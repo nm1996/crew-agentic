@@ -13,10 +13,15 @@ CREATED
        |-> CHANGES_REQUESTED -> IMPLEMENTING
        |-> EXTERNAL_EVALUATION
   -> AWAITING_FINAL_APPROVAL
-  -> COMPLETED
+       |-> COMPLETED
+       |-> REJECTED
+
+AWAITING_PLAN_APPROVAL -> PLAN_REJECTED
 ```
 
-Any active state may transition to FAILED or CANCELLED through controlled error/cancellation handling. A rejected plan transitions to CANCELLED or a dedicated PLAN_REJECTED state; choose one representation and document it consistently.
+Any active (non-terminal) state may transition to FAILED or CANCELLED through controlled error/cancellation handling.
+
+**Implemented representation** (see `src/crew/orchestrator/state_machine.py` and [DECISIONS.md](DECISIONS.md) D2): a rejected plan ends in the terminal state `PLAN_REJECTED`; a rejected final result ends in the terminal state `REJECTED`; `CANCELLED` is used only for `crew stop`. Terminal states: `COMPLETED`, `REJECTED`, `PLAN_REJECTED`, `FAILED`, `CANCELLED`. Gate states, where the engine stops and waits for a developer command: `AWAITING_PLAN_APPROVAL`, `AWAITING_FINAL_APPROVAL`.
 
 ## 2. State definitions
 
@@ -34,6 +39,9 @@ Any active state may transition to FAILED or CANCELLED through controlled error/
 - `FAILED`: unrecoverable execution or internal error.
 - `CANCELLED`: developer cancelled the run.
 - `PLAN_REJECTED`: developer rejected the proposed plan.
+- `REJECTED`: developer rejected the final result.
+
+Developer commands per gate: `crew approve-plan` / `crew reject-plan` at `AWAITING_PLAN_APPROVAL`; `crew accept` / `crew reject` at `AWAITING_FINAL_APPROVAL`.
 
 ## 3. Transition invariants
 
@@ -84,6 +92,8 @@ Only blocking findings should automatically return the run to implementation. No
 
 Limit automatic correction cycles with a configurable small default (for example, 2). When the limit is reached, stop and request developer input. Never loop indefinitely.
 
+**Implemented:** each `CHANGES_REQUESTED` creates one correction task `fix-<cycle>` containing all blocking findings, started from the current integration tip, and increments `runs.correction_cycle` (default limit `execution.max_correction_cycles: 2`). When the limit is reached with blocking findings left, the run proceeds to `EXTERNAL_EVALUATION` and then stops at `AWAITING_FINAL_APPROVAL` with a `correction_limit_reached` event and the unresolved findings highlighted in the report: that gate is the "request developer input". The evaluator's recommendation is advisory and never changes state by itself.
+
 ## 6. Failure and recovery
 
 Persist before and after each meaningful stage and task dispatch. On startup/resume:
@@ -96,6 +106,10 @@ Persist before and after each meaningful stage and task dispatch. On startup/res
 
 Use idempotency keys or unique constraints to prevent duplicate task dispatch after a crash.
 
+**Implemented** (`src/crew/orchestrator/recovery.py`): executions left `RUNNING` become `INTERRUPTED` and a still-alive orphaned agent process (verified via `/proc/<pid>/cmdline`) is terminated; tasks left `RUNNING` return to `PENDING` and get a new attempt in a fresh worktree/branch while the old worktree is preserved; completed tasks must still have their commits; a half-finished merge in the CREW integration worktree is aborted; a missing integration branch after implementation stops recovery with an explanation. Dispatch uses a compare-and-set update plus a unique `(task_pk, attempt)` constraint. One driver per run is enforced with an `flock`.
+
+Task attempts: a failed attempt is retried until `execution.max_task_attempts` (default 2); then the task is `FAILED`, dependents become `BLOCKED`, independent tasks still finish, and the run ends `FAILED`.
+
 ## 7. Cancellation
 
 Cancellation is cooperative:
@@ -105,3 +119,5 @@ Cancellation is cooperative:
 - record processes that could not be stopped;
 - preserve worktrees and diffs for inspection;
 - never delete uncommitted work automatically.
+
+**Implemented:** `crew stop` cancels immediately when no process holds the run lock; otherwise it sets `runs.cancel_requested`, which the driving process polls (every 0.5 s during implementation and between stages). Active provider processes are terminated by process group (SIGTERM, then SIGKILL after a 5 s grace period). Interrupting CREW itself (Ctrl-C) is *not* a cancellation: tasks are left resumable.

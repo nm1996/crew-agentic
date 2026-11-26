@@ -1,10 +1,23 @@
 # Instructions for Claude Code — CREW
 
-You are implementing **CREW**, a Python local-first AI development orchestration CLI. Read `README.md`, `PRODUCT_SPEC.md`, `ARCHITECTURE.md`, `WORKFLOW.md`, `AGENT_ROLES.md`, `TECHNICAL_SPEC.md`, and `SECURITY.md` before making architectural changes.
+You are working on **CREW**, a Python local-first AI development orchestration CLI. Specifications live in `docs/`: read `docs/PRODUCT_SPEC.md`, `docs/ARCHITECTURE.md`, `docs/WORKFLOW.md`, `docs/AGENT_ROLES.md`, `docs/TECHNICAL_SPEC.md`, `docs/SECURITY.md` and `docs/DECISIONS.md` before making architectural changes.
+
+## Current state
+
+The MVP (M0–M6 in `docs/ROADMAP.md`) is implemented. Commands:
+
+```bash
+uv sync --dev
+uv run pytest                     # offline suite; must stay green
+uv run ruff check . && uv run ruff format --check .
+CREW_CLAUDE_SMOKE=1 uv run pytest -m claude -s   # opt-in, real Claude CLI
+```
+
+Code map: `docs/ARCHITECTURE.md#implemented-layout`. Record new non-obvious decisions in `docs/DECISIONS.md`. Schema changes need an Alembic revision (see `CONTRIBUTING.md`).
 
 ## Operating rules
 
-1. Work milestone by milestone according to `ROADMAP.md`.
+1. Work milestone by milestone according to `docs/ROADMAP.md`.
 2. First inspect the repository, current Git status, Python versions, and installed tooling. Do not assume the environment matches the documentation.
 3. Before coding, present a short implementation plan for the current milestone and identify files to create/change.
 4. Do not implement the entire product in one giant change. Build a runnable vertical slice.
@@ -34,18 +47,6 @@ You are implementing **CREW**, a Python local-first AI development orchestration
   - `build:` packaging/dependency/build changes
   - `chore:` maintenance
 - Do not create commits unless the developer asks or the repository workflow explicitly authorizes it.
-
-## First task
-
-Start with **M0 — Foundation**, not with agent orchestration.
-
-1. Inspect the current repository and environment.
-2. Propose the smallest M0 implementation plan.
-3. Confirm Python/dependency compatibility and choose the interpreter supported by the environment.
-4. Scaffold the package, CLI, configuration, `init`, and `doctor`.
-5. Add focused tests.
-6. Run formatting, linting if configured, and tests.
-7. Summarize evidence and stop for developer review before moving to M1.
 
 ## Definition of done for a change
 

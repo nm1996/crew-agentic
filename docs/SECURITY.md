@@ -75,3 +75,23 @@ Consider:
 - malicious dependency lifecycle scripts.
 
 Document residual risks rather than claiming perfect isolation. A Git worktree is isolation of working files, not a security sandbox.
+
+## 8. Implemented controls
+
+| Safeguard | Where it is enforced | Test |
+|---|---|---|
+| No push/merge/deploy | `workspace/git.py` refuses network and destructive git outside CREW worktrees; CREW only merges into `crew/<run>/integration` | `tests/integration/test_workspace.py`, `tests/e2e/test_workflow.py::test_full_run_reaches_completion_without_touching_user_branch` |
+| No implementation before plan approval | state machine has no path around `AWAITING_PLAN_APPROVAL`; engine stops at gates | `tests/unit/test_state_machine.py`, `test_plan_rejection_never_implements` |
+| No completion before final approval | only `crew accept` performs `AWAITING_FINAL_APPROVAL → COMPLETED` | `test_final_completion_requires_explicit_accept` |
+| Gates cannot be disabled | `approvals.*` typed `Literal[True]` | `tests/unit/test_config.py` |
+| Implementers confined to their worktree | agent `cwd` is always a CREW worktree; `--restricted` | `test_every_agent_runs_in_a_crew_owned_worktree` |
+| Read-only roles | Director/Reviewer/Evaluator get only `Read,Glob,Grep` in `dontAsk` mode | `tests/unit/test_claude_adapter.py` |
+| No permission bypass | adapter never emits bypass flags; `--permission-prompts none` | `test_never_bypasses_permissions` |
+| User changes never overwritten | dirty tree blocks `approve-plan`; no stash/reset/clean anywhere; cleanup uses `git worktree remove` (refuses dirty trees) | `test_approval_refused_on_dirty_tree`, `test_dirty_worktree_is_preserved_on_cleanup` |
+| Timeouts and output limits | `security/execution_policy.py::run_command`, adapter `timeout_seconds`, process-group termination | `test_run_command_times_out_and_kills`, `test_execute_timeout_kills_process` |
+| Secret redaction; no env persisted | `security/redaction.py` applied to prompts, outputs, commands, events, logs; minimal env for commands | `tests/unit/test_redaction.py`, `test_run_command_does_not_leak_environment` |
+| Secret files excluded from context | `context/collector.py::SECRET_GLOBS`, passed as `Read(...)` deny rules; agents see committed files only | `test_never_bypasses_permissions` |
+| Commands recorded | `command_executions` table (git + verification), `agent_executions` | `test_verification_commands_are_recorded_as_evidence` |
+| No shell interpolation | every subprocess uses argument lists; verification commands refuse shells/operators | `tests/unit/test_execution_policy.py` |
+
+Residual risks are listed in [DECISIONS.md](DECISIONS.md#known-limitations).

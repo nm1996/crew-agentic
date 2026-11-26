@@ -36,6 +36,10 @@ Initial commands:
 - `crew resume <run-id>`
 - `crew stop <run-id>`
 - `crew report <run-id>`
+- `crew accept <run-id>` / `crew reject <run-id>` (final gate; added during implementation)
+- `crew history`
+
+Exit codes are documented in [USAGE.md](USAGE.md#exit-codes) and `src/crew/cli/app.py`.
 
 Prefer explicit approval commands for MVP. Interactive approval can be added later. Commands must return meaningful exit codes and avoid printing secrets.
 
@@ -68,6 +72,8 @@ approvals:
 ```
 
 Validate hard safety limits in code. Configuration must not allow disabling mandatory approval gates in MVP.
+
+**Implemented shape:** see [CONFIGURATION.md](CONFIGURATION.md) and `src/crew/config/schema.py`. Changes from the example above: `git.integration_branch_prefix` became `git.branch_prefix` (branches are `<prefix>/<run>/integration` and `<prefix>/<run>/<task>-a<attempt>`); added `provider.claude_code.{model,max_budget_usd,restricted,implementer_bash_rules,reviewer_bash_rules}`, `execution.{max_task_attempts,command_output_limit_bytes,verification_commands}` and a `context` section. `approvals.*` are typed `Literal[True]`.
 
 ## 4. Provider interface
 
@@ -103,6 +109,8 @@ Do not leak Claude-specific response objects into domain models.
 
 Keep provider invocation isolated so a future Claude Agent SDK adapter or another provider can be added without rewriting orchestration.
 
+**Implemented:** exact flags and the permission model per role are documented in [DECISIONS.md](DECISIONS.md) D6 and `src/crew/providers/claude_code/adapter.py`. `crew doctor` checks that the installed CLI advertises every flag CREW uses.
+
 ## 6. Persistence
 
 Use SQLite via SQLAlchemy. Suggested entities:
@@ -135,6 +143,8 @@ Do not store API keys, environment dumps, or raw secret-bearing process environm
 
 The exact integration strategy (merge commits versus cherry-pick) must be selected and documented during implementation. Prefer the simplest strategy that preserves task provenance and handles conflicts safely.
 
+**Selected:** `git merge --no-ff` of each task branch into a CREW integration branch, in topological order; dependent tasks merge their dependencies' branches into their own worktree before starting. Rationale and details: [DECISIONS.md](DECISIONS.md) D4.
+
 ## 8. Reports and artifacts
 
 Store run artifacts under `.crew/runs/<run-id>/` or an equivalent consistent layout:
@@ -145,6 +155,7 @@ Store run artifacts under `.crew/runs/<run-id>/` or an equivalent consistent lay
 - `external-evaluation.md`
 - `test-results.md`
 - `final-report.md`
+- `context.md` (Director input; added during implementation)
 
 The SQLite database is authoritative for workflow state. Markdown artifacts are human-readable evidence and exports, not a competing state store.
 
@@ -156,3 +167,5 @@ The SQLite database is authoritative for workflow state. Markdown artifacts are 
 - A small opt-in Claude smoke test, skipped unless explicitly enabled and credentials are available.
 - Failure tests: provider timeout, malformed output, process termination, interrupted run, missing worktree, dirty repository, dependency failure, merge conflict, cancellation.
 - Avoid tests that merely mirror implementation details. Test observable behavior and invariants.
+
+**Implemented layout:** `tests/unit` (pure logic, adapter with a stub executable), `tests/integration` (temporary Git repositories: init, doctor, worktrees, store), `tests/e2e` (complete fake-provider workflows and the CLI). The real Claude smoke tests in `tests/e2e/test_claude_smoke.py` run only with `CREW_CLAUDE_SMOKE=1`.
