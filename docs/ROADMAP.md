@@ -2,7 +2,7 @@
 
 Build in vertical slices. Keep the application runnable at every milestone.
 
-## Status (v0.1.0)
+## Status
 
 | Milestone | Status | Notes |
 |---|---|---|
@@ -12,9 +12,46 @@ Build in vertical slices. Keep the application runnable at every milestone.
 | M3 Planning and approvals | Done | Context collection with exclusions, DAG validation with one corrective retry, plan gate. |
 | M4 Worktrees and implementation | Done | Clean-tree precondition, per-task worktrees, dependency-aware scheduler (≤2), merge integration, conflict detection. |
 | M5 Review and evaluation | Done | Structured findings, bounded corrections, independent evaluator, final gate, reports. |
-| M6 Recovery and hardening | Done (MVP) | Resume/reconcile, cancellation, orphan handling, redaction tests, e2e tests, docs. Release tagging is left to the maintainer. |
+| M6 Recovery and hardening | Done (0.1.0) | Resume/reconcile, cancellation, orphan handling, redaction tests, e2e tests, docs. |
+| M7 Hardening and cross-platform | Done (0.2.0) | See below. |
 
-Next candidates (post-MVP): retrying `FAILED` runs from the failed stage, a Claude Agent SDK adapter, interactive approval prompts, cleanup command for finished runs, macOS CI.
+## M7 — Hardening and cross-platform (0.2.0)
+
+Driven by an independent review of 0.1.0. Each item links to its decision record.
+
+| Item | Status | Decision |
+|---|---|---|
+| Structured, central secret redaction (JSON stays valid) | Done | D11 |
+| Cancellation before gates, in every stage, and on immediate stop | Done | D15 |
+| Clean failure of tasks/executions on unexpected errors | Done | D8 |
+| Git policy: UTF-8, `-z`, writes only in CREW worktrees, hooks off, commit filter, recorded commands | Done | D14 |
+| Claude isolation: mandatory `--restricted`, `--strict-mcp-config`, security flags first | Done | D6 |
+| Reserved `crew-` task ids; snapshot worktrees for Reviewer/Evaluator | Done | D5, D18 |
+| Platform layer: process trees, PID identity, portable lock, signal handling | Done | D13 |
+| Windows conventions: `claude.cmd` shim, PATHEXT, argv-list verification commands, env | Done | D6, D12 |
+| CI on Linux, macOS and Windows × Python 3.12/3.13 (incl. autocrlf) | Done | – |
+| Per-run budget | Done | D16 |
+| `crew retry` for FAILED runs | Done | D8 |
+| `crew cleanup` | Done | D17 |
+
+**Exit condition:** full suite green on all three operating systems; real Claude Code smoke
+run passes on Linux.
+
+## M8 — Candidates
+
+Ordered by value; none started.
+
+1. **Sandboxed verification** (`execution.sandbox: none|bwrap|docker`) — closes the
+   "verification runs agent-written code" limitation.
+2. **Windows Job Objects** for kill-on-close of whole agent trees, and a Windows smoke
+   run against a native `claude.exe` (also verifies `PowerShell(...)` rules).
+3. **Explicit `crew publish <id> [--pr]`** — push only `crew/<run>/integration` and open a
+   PR, on explicit command, keeping "never push automatically".
+4. **Claude Agent SDK provider** behind `AgentProvider`, with programmatic `can_use_tool`
+   permission decisions and streaming progress.
+5. **Observability:** `stream-json` tool-use events per execution, `crew logs -f`.
+6. **Interactive approvals** (`crew run --interactive`), later a TUI.
+7. **PyPI release** with trusted publishing on tags.
 
 ## M0 — Foundation
 
