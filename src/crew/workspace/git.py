@@ -292,6 +292,31 @@ class Git:
         self.run(*CREW_IDENTITY, "commit", "--quiet", "--no-verify", "--no-edit")
         return self.head()
 
+    def push_owned_branch(self, remote: str, name: str, owned_prefix: str) -> None:
+        """Push one CREW branch to ``remote``. The only network operation CREW performs.
+
+        Used solely by the explicit ``crew publish`` command. Only names under
+        ``owned_prefix`` are accepted and force-pushing is impossible.
+        """
+        if not name.startswith(owned_prefix) or ".." in name or name.startswith("-"):
+            raise PolicyViolationError(f"refusing to push non-CREW branch {name!r}")
+        if remote.startswith("-"):
+            raise PolicyViolationError(f"invalid remote {remote!r}")
+        argv = ["git", "push", "--no-verify", remote, f"refs/heads/{name}:refs/heads/{name}"]
+        proc = subprocess.run(
+            ["git", *_isolation_options(), *argv[1:]],
+            cwd=self.cwd,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            env=_git_env(),
+        )
+        if self.recorder:
+            self.recorder(argv, self.cwd, proc.returncode, redact(proc.stderr[-2000:]))
+        if proc.returncode != 0:
+            raise GitError(f"could not push {name} to {remote}: {redact(proc.stderr.strip())}")
+
     def delete_owned_branch(self, name: str, owned_prefix: str) -> None:
         """Delete a CREW branch. Only names under ``owned_prefix`` are accepted.
 
