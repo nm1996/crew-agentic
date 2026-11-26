@@ -1,0 +1,395 @@
+"""End-to-end workflow tests with the fake provider in temporary repositories.
+
+These map to the MVP acceptance criteria in docs/PRODUCT_SPEC.md §7.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from pathlib import Path
+
+import pytest
+
+from crew.domain.enums import ExecutionStatus, Role, RunState, TaskStatus
+from crew.domain.errors import InvalidTransitionError, PreconditionError, RunLockedError
+from crew.orchestrator.lock import RunLock
+from crew.providers.base import AgentRequest
+from crew.providers.fake import FakeProvider, default_director, default_implementer
+from tests.conftest import git
+
+
+def plan_with(*tasks: tuple[str, list[str]]):
+    def director(_req: AgentRequest) -> dict:
+        plan = default_director(_req)
+        plan["tasks"] = [
+            {
+                "id": key,
+                "title": f"Task {key}",
+                "description": f"Implement {key} carefully",
+                "dependencies": deps,
+                "acceptance_criteria": [f"{key} done"],
+            }
+            for key, deps in tasks
+        ]
+        return plan
+
+    return director
+
+
+def blocking_review(_req: AgentRequest) -> dict:
+    return {
+        "assessment": "needs work",
+        "findings": [
+            {
+                "severity": "HIGH",
+                "category": "correctness",
+                "title": "Missing edge case",
+                "file": "crew_fake/part-a.md",
+                "line_start": 1,
+                "explanation": "edge case not handled",
+                "recommendation": "handle it",
+                "blocking": True,
+            }
+        ],
+    }
+
+
+# ---- AC 3, 6, 13: full run, gates, no automatic merge -----------------------
+
+
+def test_full_run_reaches_completion_without_touching_user_branch(make_orch, fake, repo: Path):
+    head_before = git(repo, "rev-parse", "HEAD").strip()
+    orch = make_orch()
+    run = orch.start_run("Add a feature")
+    assert run.state == RunState.AWAITING_PLAN_APPROVAL
+    assert not [c for c in fake.calls if c.role is Role.IMPLEMENTER]
+
+    run = orch.approve_plan(run.id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL
+    run = orch.accept(run.id)
+    assert run.state == RunState.COMPLETED
+
+    # The user's branch, HEAD and working tree are untouched (AC 13).
+    assert git(repo, "rev-parse", "HEAD").strip() == head_before
+    assert git(repo, "status", "--porcelain").strip() == ""
+    assert not (repo / "crew_fake").exists()
+    # The result lives on the CREW integration branch.
+    files = git(repo, "ls-tree", "-r", "--name-only", run.integration_branch).split()
+    assert {"crew_fake/part-a.md", "crew_fake/part-b.md", "crew_fake/part-c.md"} <= set(files)
+    # Report and stage artifacts exist (AC 14).
+    run_dir = orch.p.paths.run_dir(run.id)
+    for name in (
+        "request.md",
+        "plan.md",
+        "implementation.md",
+        "review.md",
+        "external-evaluation.md",
+        "test-results.md",
+        "final-report.md",
+    ):
+        assert (run_dir / name).is_file(), name
+    report = (run_dir / "final-report.md").read_text()
+    assert "COMPLETED" in report and "git merge --no-ff" in report
+
+
+def test_every_agent_runs_in_a_crew_owned_worktree(make_orch, fake, repo: Path):
+    orch = make_orch()
+    run = orch.approve_plan(orch.start_run("x").id)
+    worktrees = (repo / ".crew" / "worktrees").resolve()
+    for call in fake.calls:
+        assert worktrees in call.cwd.resolve().parents, call.cwd
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL
+
+
+def test_plan_rejection_never_implements(make_orch, fake):
+    orch = make_orch()
+    run = orch.reject_plan(orch.start_run("x").id, "not what I want")
+    assert run.state == RunState.PLAN_REJECTED
+    assert not [c for c in fake.calls if c.role is Role.IMPLEMENTER]
+    with pytest.raises(InvalidTransitionError):
+        orch.approve_plan(run.id)
+
+
+def test_final_rejection(make_orch):
+    orch = make_orch()
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert orch.reject(run.id, "no").state == RunState.REJECTED
+
+
+def test_approval_refused_on_dirty_tree(make_orch, repo: Path):
+    orch = make_orch()
+    run = orch.start_run("x")
+    (repo / "app.py").write_text("my uncommitted work\n")
+    with pytest.raises(PreconditionError):
+        orch.approve_plan(run.id)
+    assert orch.store.get_run(run.id).state == RunState.AWAITING_PLAN_APPROVAL
+    assert (repo / "app.py").read_text() == "my uncommitted work\n"
+
+
+def test_final_completion_requires_explicit_accept(make_orch):
+    orch = make_orch()
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert orch.drive(run.id).state == RunState.AWAITING_FINAL_APPROVAL  # driving does not pass
+    assert orch.resume(run.id).state == RunState.AWAITING_FINAL_APPROVAL  # the gate on its own
+    with pytest.raises(InvalidTransitionError):
+        orch.approve_plan(run.id)  # wrong gate
+    assert orch.store.get_run(run.id).state == RunState.AWAITING_FINAL_APPROVAL
+
+
+# ---- AC 7, 8: concurrency limit and dependencies ----------------------------
+
+
+def test_at_most_two_implementers_run_concurrently(make_orch):
+    fake = FakeProvider(delay_seconds=0.3)
+    fake.on(Role.DIRECTOR, plan_with(("a", []), ("b", []), ("c", [])))
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL
+    assert fake.max_active[Role.IMPLEMENTER] == 2
+
+
+def test_configured_limit_of_one_serialises(make_orch, configure_project):
+    project = configure_project(execution={"max_implementers": 1})
+    fake = FakeProvider(delay_seconds=0.1)
+    fake.on(Role.DIRECTOR, plan_with(("a", []), ("b", [])))
+    orch = make_orch(project, fake)
+    orch.approve_plan(orch.start_run("x").id)
+    assert fake.max_active[Role.IMPLEMENTER] == 1
+
+
+def test_dependencies_are_respected(make_orch):
+    timeline: list[tuple[str, str]] = []
+
+    async def implementer(req: AgentRequest) -> dict:
+        timeline.append(("start", req.task_key))
+        await asyncio.sleep(0.2)
+        result = default_implementer(req)
+        timeline.append(("end", req.task_key))
+        return result
+
+    fake = FakeProvider()
+    fake.on(Role.DIRECTOR, plan_with(("base", []), ("child", ["base"]), ("other", [])))
+    fake.on(Role.IMPLEMENTER, implementer)
+    orch = make_orch(provider=fake)
+    orch.approve_plan(orch.start_run("x").id)
+    assert timeline.index(("end", "base")) < timeline.index(("start", "child"))
+    # 'other' has no dependency, so it runs alongside 'base'.
+    assert timeline.index(("start", "other")) < timeline.index(("end", "base"))
+
+
+# ---- AC 5: director output validation ---------------------------------------
+
+
+def test_invalid_director_graph_is_retried_then_fails(make_orch):
+    fake = FakeProvider()
+    fake.on(Role.DIRECTOR, plan_with(("a", ["b"]), ("b", ["a"])))
+    orch = make_orch(provider=fake)
+    run = orch.start_run("x")
+    assert run.state == RunState.FAILED
+    assert "cycle" in run.failure_reason
+    assert len([c for c in fake.calls if c.role is Role.DIRECTOR]) == 2
+
+
+def test_director_is_corrected_after_feedback(make_orch):
+    calls = {"n": 0}
+
+    def director(req: AgentRequest) -> dict:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return plan_with(("Bad Id", []))(req)
+        assert "rejected by CREW validation" in req.prompt
+        return plan_with(("good", []))(req)
+
+    orch = make_orch(provider=FakeProvider().on(Role.DIRECTOR, director))
+    assert orch.start_run("x").state == RunState.AWAITING_PLAN_APPROVAL
+
+
+def test_malformed_director_output_fails_run(make_orch):
+    orch = make_orch(provider=FakeProvider().on(Role.DIRECTOR, lambda _r: {"nonsense": True}))
+    run = orch.start_run("x")
+    assert run.state == RunState.FAILED
+    assert "schema validation" in run.failure_reason
+    executions = orch.store.executions(run.id, role=Role.DIRECTOR)
+    assert executions[0].status == ExecutionStatus.FAILED
+
+
+# ---- AC 9, 10: review corrections and independent evaluation ---------------
+
+
+def test_blocking_review_triggers_one_correction_cycle(make_orch):
+    reviews = iter([blocking_review, lambda _r: {"assessment": "fixed now", "findings": []}])
+    fake = FakeProvider().on(Role.REVIEWER, lambda r: next(reviews)(r))
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL
+    assert run.correction_cycle == 1
+    fix = orch.store.get_task(run.id, "fix-1")
+    assert fix.status == TaskStatus.COMPLETED and fix.integrated
+    implementer_prompts = [c.prompt for c in fake.calls if c.task_key == "fix-1"]
+    assert "Missing edge case" in implementer_prompts[0]
+    # Second review saw the first review's findings.
+    reviewer_prompts = [c.prompt for c in fake.calls if c.role is Role.REVIEWER]
+    assert "Previous review cycle" in reviewer_prompts[1]
+
+
+def test_correction_cycles_are_bounded(make_orch, configure_project):
+    project = configure_project(execution={"max_correction_cycles": 1})
+    fake = FakeProvider().on(Role.REVIEWER, blocking_review)
+    orch = make_orch(project, fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL  # developer decides
+    assert run.correction_cycle == 1
+    assert len([c for c in fake.calls if c.role is Role.REVIEWER]) == 2
+    events = [e.type for e in orch.store.events(run.id)]
+    assert "correction_limit_reached" in events
+    report = (orch.p.paths.run_dir(run.id) / "final-report.md").read_text()
+    assert "Unresolved blocking findings" in report
+
+
+def test_evaluator_receives_request_plan_diff_and_labelled_claims(make_orch, fake):
+    orch = make_orch()
+    orch.approve_plan(orch.start_run("Add the frobnicator").id)
+    prompt = next(c.prompt for c in fake.calls if c.role is Role.EVALUATOR)
+    assert "Add the frobnicator" in prompt
+    assert "Approved plan" in prompt
+    assert "+# part-a" in prompt  # actual diff content, not just summaries
+    assert "CLAIMS" in prompt
+
+
+def test_verification_commands_are_recorded_as_evidence(make_orch, configure_project):
+    project = configure_project(execution={"verification_commands": ["ls crew_fake"]})
+    fake = FakeProvider()
+    orch = make_orch(project, fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    commands = orch.store.commands(run.id, purpose="verification")
+    assert len(commands) == 1 and commands[0].exit_code == 0
+    assert "part-a.md" in commands[0].stdout
+    reviewer_prompt = next(c.prompt for c in fake.calls if c.role is Role.REVIEWER)
+    assert "`ls crew_fake` — exit 0" in reviewer_prompt
+
+
+# ---- failures, conflicts (AC 12) --------------------------------------------
+
+
+def test_failing_task_is_retried_then_blocks_dependents(make_orch):
+    def implementer(req: AgentRequest) -> dict:
+        if req.task_key == "a":
+            return {"summary": ""}  # invalid: summary too short
+        return default_implementer(req)
+
+    fake = FakeProvider()
+    fake.on(Role.DIRECTOR, plan_with(("a", []), ("b", ["a"]), ("c", [])))
+    fake.on(Role.IMPLEMENTER, implementer)
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.FAILED
+    statuses = {t.key: t.status for t in orch.store.tasks(run.id)}
+    assert statuses == {"a": "FAILED", "b": "BLOCKED", "c": "COMPLETED"}
+    assert orch.store.get_task(run.id, "a").attempt == 2  # retried once
+
+
+def test_merge_conflict_stops_safely_and_preserves_work(make_orch, repo: Path):
+    def implementer(req: AgentRequest) -> dict:
+        (req.cwd / "app.py").write_text(f"conflicting change from {req.task_key}\n")
+        return {"summary": "edited app.py", "changed_files": ["app.py"]}
+
+    fake = FakeProvider()
+    fake.on(Role.DIRECTOR, plan_with(("a", []), ("b", [])))
+    fake.on(Role.IMPLEMENTER, implementer)
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.FAILED
+    assert "merge conflict" in run.failure_reason and "app.py" in run.failure_reason
+    assert (repo / "app.py").read_text() == "def hello():\n    return 'hi'\n"
+    for key in ("a", "b"):
+        task = orch.store.get_task(run.id, key)
+        assert Path(task.worktree_path).exists()  # preserved for inspection
+    integration = orch.p.workspace.integration_path(run.id)
+    assert git(integration, "status", "--porcelain").strip() == ""  # merge was aborted
+
+
+# ---- AC 11: interruption, recovery, cancellation, locking --------------------
+
+
+def test_interrupted_run_resumes_with_fresh_attempt(make_orch, fake):
+    orch = make_orch()
+    run = orch.approve_plan(orch.start_run("x").id, proceed=False)
+    assert run.state == RunState.IMPLEMENTING
+
+    # Simulate a crash mid-task: task claimed, worktree created, process gone.
+    task = orch.store.get_task(run.id, "part-a")
+    claimed = orch.store.claim_task(task, "crashed-exec")
+    orch.store.start_execution(
+        run_id=run.id,
+        role=Role.IMPLEMENTER,
+        provider="fake",
+        cwd="/nowhere",
+        prompt="",
+        cycle=0,
+        task=claimed,
+        execution_id="crashed-exec",
+    )
+    ws = orch.p.workspace
+    ws.ensure_integration_worktree(run.id, run.base_commit)
+    stale, _ = ws.create_task_worktree(run.id, "part-a", 1, ws.integration_branch(run.id), [])
+    (stale / "partial.txt").write_text("half-done work")
+
+    run = make_orch().resume(run.id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL
+    task = orch.store.get_task(run.id, "part-a")
+    assert task.status == TaskStatus.COMPLETED and task.attempt == 2
+    assert (stale / "partial.txt").exists()  # old attempt preserved, not reused
+    crashed = next(e for e in orch.store.executions(run.id) if e.id == "crashed-exec")
+    assert crashed.status == ExecutionStatus.INTERRUPTED
+    files = git(orch.p.paths.root, "ls-tree", "-r", "--name-only", run.integration_branch)
+    assert "partial.txt" not in files
+
+
+def test_resume_of_terminal_run_is_refused(make_orch):
+    orch = make_orch()
+    run = orch.reject_plan(orch.start_run("x").id)
+    with pytest.raises(InvalidTransitionError):
+        orch.resume(run.id)
+
+
+def test_stop_without_active_driver_cancels_immediately(make_orch):
+    orch = make_orch()
+    run = orch.start_run("x")
+    run, immediate = orch.stop(run.id)
+    assert immediate and run.state == RunState.CANCELLED
+
+
+def test_cooperative_cancellation_during_implementation(make_orch):
+    holder = {}
+
+    async def implementer(req: AgentRequest) -> dict:
+        holder["orch"].store.request_cancel(req.run_id)
+        await asyncio.sleep(5)  # would be killed by cancellation
+        return default_implementer(req)
+
+    fake = FakeProvider().on(Role.IMPLEMENTER, implementer)
+    orch = make_orch(provider=fake)
+    holder["orch"] = orch
+    started = time.monotonic()
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert time.monotonic() - started < 4
+    assert run.state == RunState.CANCELLED
+    statuses = {t.status for t in orch.store.tasks(run.id)}
+    assert TaskStatus.RUNNING not in statuses
+    assert TaskStatus.CANCELLED in statuses
+
+
+def test_second_driver_is_locked_out(make_orch):
+    orch = make_orch()
+    run = orch.start_run("x")
+    lock = RunLock(orch.p.paths.run_dir(run.id) / ".lock")
+    assert lock.try_acquire()
+    try:
+        with pytest.raises(RunLockedError):
+            orch.approve_plan(run.id)
+        _, immediate = orch.stop(run.id)
+        assert not immediate  # cancellation requested from the active driver instead
+        assert orch.store.get_run(run.id).cancel_requested
+    finally:
+        lock.release()
