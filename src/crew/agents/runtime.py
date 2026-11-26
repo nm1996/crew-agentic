@@ -11,7 +11,7 @@ import uuid
 from functools import cache
 from importlib.resources import files
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -22,7 +22,7 @@ from crew.domain.enums import ExecutionStatus, Role
 from crew.domain.errors import BudgetExceededError, ProviderError
 from crew.persistence.models import JsonMixin, Task
 from crew.persistence.store import Store
-from crew.providers.base import AgentProvider, AgentRequest, Capabilities
+from crew.providers.base import AgentProvider, AgentRequest, AgentResult, Capabilities
 from crew.security.redaction import redact, redact_data
 
 M = TypeVar("M", bound=BaseModel)
@@ -55,6 +55,16 @@ def capabilities_for(role: Role, config: CrewConfig) -> Capabilities:
             deny_read_globs=deny,
         )
     return Capabilities(can_edit_files=False, deny_read_globs=deny)
+
+
+def _usage_fields(result: AgentResult) -> dict[str, Any]:
+    meta = result.metadata
+    models = meta.get("models") or []
+    return {
+        "num_turns": meta.get("num_turns"),
+        "model": ",".join(models)[:120] or None,
+        "usage_json": JsonMixin.dumps(meta["usage"]) if meta.get("usage") else None,
+    }
 
 
 class AgentRuntime:
@@ -153,6 +163,8 @@ class AgentRuntime:
                 raw_output=JsonMixin.dumps(redact_data(result.output))[:100_000],
                 session_id=result.session_id,
                 cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+                **_usage_fields(result),
             )
             raise ProviderError(message, kind="invalid_output") from exc
 
@@ -164,5 +176,6 @@ class AgentRuntime:
             session_id=result.session_id,
             cost_usd=result.cost_usd,
             duration_seconds=result.duration_seconds,
+            **_usage_fields(result),
         )
         return model

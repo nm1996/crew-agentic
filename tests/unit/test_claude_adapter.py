@@ -228,3 +228,23 @@ def test_restricted_cannot_be_disabled():
                 "provider": {"claude_code": {"restricted": False}},
             }
         )
+
+
+def test_parse_usage_and_models():
+    out = json.dumps(
+        {
+            "subtype": "success",
+            "structured_output": {"a": 1},
+            "num_turns": 7,
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 20,
+                "cache_read_input_tokens": 300,
+                "service_tier": "standard",
+            },
+            "modelUsage": {"claude-opus-5-5": {"costUSD": 0.1}},
+        }
+    )
+    parsed = parse_cli_output(out)
+    assert parsed.usage == {"input_tokens": 10, "output_tokens": 20, "cache_read_input_tokens": 300}
+    assert parsed.models == ["claude-opus-5-5"] and parsed.num_turns == 7

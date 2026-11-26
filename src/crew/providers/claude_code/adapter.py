@@ -205,5 +205,10 @@ class ClaudeCodeProvider:
             session_id=parsed.session_id,
             cost_usd=parsed.cost_usd,
             duration_seconds=round(time.monotonic() - started, 3),
-            metadata={"num_turns": parsed.num_turns, "exit_code": proc.returncode},
+            metadata={
+                "num_turns": parsed.num_turns,
+                "exit_code": proc.returncode,
+                "usage": parsed.usage,
+                "models": parsed.models,
+            },
         )

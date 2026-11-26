@@ -631,3 +631,13 @@ def test_unavailable_sandbox_fails_closed(make_orch, configure_project, monkeypa
     assert run.state == RunState.FAILED
     assert "sandbox 'bwrap' is unavailable" in run.failure_reason
     assert orch.store.commands(run.id, purpose="verification") == []  # nothing ran unsandboxed
+
+
+def test_report_contains_usage_by_role(make_orch):
+    fake = FakeProvider(cost_per_call=0.25)
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    report = (orch.p.paths.run_dir(run.id) / "final-report.md").read_text()
+    assert "## Agent usage" in report
+    assert "| implementer | 3 | 0.7500 |" in report
+    assert "**1.5000**" in report  # 6 executions x 0.25

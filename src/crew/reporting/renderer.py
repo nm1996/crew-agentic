@@ -153,6 +153,49 @@ def render_tasks(tasks: list[Task]) -> str:
     return "\n".join(lines)
 
 
+def render_usage(executions: list) -> str:
+    """Cost, time, turns and tokens per role (provider-reported)."""
+    if not executions:
+        return "_No agent executions._"
+    rows: dict[str, dict[str, float]] = {}
+    for e in executions:
+        r = rows.setdefault(
+            e.role, {"n": 0, "cost": 0, "secs": 0, "turns": 0, "in": 0, "out": 0, "cache": 0}
+        )
+        usage = e.usage
+        r["n"] += 1
+        r["cost"] += e.cost_usd or 0
+        r["secs"] += e.duration_seconds or 0
+        r["turns"] += e.num_turns or 0
+        r["in"] += usage.get("input_tokens", 0) + usage.get("cache_creation_input_tokens", 0)
+        r["out"] += usage.get("output_tokens", 0)
+        r["cache"] += usage.get("cache_read_input_tokens", 0)
+    lines = [
+        "| Role | Executions | Cost (USD) | Agent time (s) | Turns | Input tok | Output tok "
+        "| Cache-read tok |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    total = {k: 0.0 for k in ("n", "cost", "secs", "turns", "in", "out", "cache")}
+    for role in ("director", "implementer", "reviewer", "evaluator"):
+        if role not in rows:
+            continue
+        r = rows[role]
+        for k in total:
+            total[k] += r[k]
+        lines.append(
+            f"| {role} | {r['n']:.0f} | {r['cost']:.4f} | {r['secs']:.0f} | {r['turns']:.0f} "
+            f"| {r['in']:.0f} | {r['out']:.0f} | {r['cache']:.0f} |"
+        )
+    lines.append(
+        f"| **total** | {total['n']:.0f} | **{total['cost']:.4f}** | {total['secs']:.0f} "
+        f"| {total['turns']:.0f} | {total['in']:.0f} | {total['out']:.0f} | {total['cache']:.0f} |"
+    )
+    models = sorted({m for e in executions if e.model for m in e.model.split(",")})
+    if models:
+        lines += ["", "Models: " + ", ".join(f"`{m}`" for m in models)]
+    return "\n".join(lines)
+
+
 def render_final_report(store: Store, run: Run) -> str:
     tasks = store.tasks(run.id)
     approvals = store.approvals(run.id)
@@ -227,6 +270,8 @@ def render_final_report(store: Store, run: Run) -> str:
         lines += ["", "Unresolved risks:", *_bullets(evaluation.get("unresolved_risks"))]
     else:
         lines.append("_Not performed._")
+
+    lines += ["", "## Agent usage", "", render_usage(executions)]
 
     lines += ["", "## Developer decisions", ""]
     lines += [

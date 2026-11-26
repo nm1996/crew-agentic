@@ -26,6 +26,16 @@ class ParsedResult:
     cost_usd: float | None
     num_turns: int | None
     result_text: str
+    usage: dict[str, int]
+    models: list[str]
+
+
+USAGE_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+)
 
 
 def _load_envelope(stdout: str) -> dict[str, Any]:
@@ -90,10 +100,16 @@ def parse_cli_output(stdout: str) -> ParsedResult:
     cost = envelope.get("total_cost_usd")
     turns = envelope.get("num_turns")
     session = envelope.get("session_id")
+    raw_usage = envelope.get("usage") if isinstance(envelope.get("usage"), dict) else {}
+    usage = {k: int(raw_usage[k]) for k in USAGE_FIELDS if isinstance(raw_usage.get(k), int)}
+    model_usage = envelope.get("modelUsage")
+    models = sorted(model_usage) if isinstance(model_usage, dict) else []
     return ParsedResult(
         output=output,
         session_id=session if isinstance(session, str) else None,
         cost_usd=float(cost) if isinstance(cost, int | float) else None,
         num_turns=turns if isinstance(turns, int) else None,
         result_text=result_text,
+        usage=usage,
+        models=models,
     )

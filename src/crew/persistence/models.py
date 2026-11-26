@@ -145,8 +145,16 @@ class AgentExecution(Base, JsonMixin):
     session_id: Mapped[str | None] = mapped_column(String(80))
     cost_usd: Mapped[float | None] = mapped_column(Float)
     duration_seconds: Mapped[float | None] = mapped_column(Float)
+    num_turns: Mapped[int | None] = mapped_column(Integer)
+    model: Mapped[str | None] = mapped_column(String(120))
+    # Provider-reported token counts, e.g. {"input_tokens": 12, "output_tokens": 34, ...}
+    usage_json: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    @property
+    def usage(self) -> dict[str, int]:
+        return self.loads(self.usage_json, {})
 
     @property
     def output(self) -> dict[str, Any] | None:
