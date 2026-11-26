@@ -168,6 +168,50 @@ class ContextSettings(_Strict):
     exclude: list[str] = Field(default_factory=list)
 
 
+_ENV_NAME = r"^[A-Z_][A-Z0-9_]*$"
+
+
+class JiraSettings(_Strict):
+    kind: Literal["jira"] = "jira"
+    base_url: str = Field(pattern=r"^https://", description="e.g. https://acme.atlassian.net")
+    email_env: str = Field(default="JIRA_EMAIL", pattern=_ENV_NAME)
+    token_env: str = Field(default="JIRA_API_TOKEN", pattern=_ENV_NAME)
+    # On `crew publish`: comment with the PR link/summary, and optionally transition.
+    comment_on_publish: bool = True
+    transition_on_publish: str | None = None  # e.g. "In Review"
+
+
+class GitHubSettings(_Strict):
+    kind: Literal["github"] = "github"
+    repo: str = Field(pattern=r"^[\w.-]+/[\w.-]+$", description="owner/name")
+    remote: str = "origin"
+    base_branch: str | None = None  # default: the run's base branch
+    token_env: str = Field(default="GITHUB_TOKEN", pattern=_ENV_NAME)
+    api_url: str = Field(default="https://api.github.com", pattern=r"^https://")
+
+
+class ConfluenceSettings(_Strict):
+    kind: Literal["confluence"] = "confluence"
+    base_url: str = Field(pattern=r"^https://", description="e.g. https://acme.atlassian.net")
+    email_env: str = Field(default="CONFLUENCE_EMAIL", pattern=_ENV_NAME)
+    token_env: str = Field(default="CONFLUENCE_API_TOKEN", pattern=_ENV_NAME)
+    space_id: str | None = None  # where `crew publish --docs` creates pages
+    parent_id: str | None = None
+
+
+class FolderDocsSettings(_Strict):
+    """Documentation as Markdown files in a folder (no credentials needed)."""
+
+    kind: Literal["folder"] = "folder"
+    path: str = "docs/crew-reports"
+
+
+class IntegrationSettings(_Strict):
+    issue_tracker: JiraSettings | None = None
+    code_host: GitHubSettings | None = None
+    docs: ConfluenceSettings | FolderDocsSettings | None = Field(default=None, discriminator="kind")
+
+
 class CrewConfig(_Strict):
     version: Literal[1] = CONFIG_VERSION
     project: ProjectSettings
@@ -176,3 +220,4 @@ class CrewConfig(_Strict):
     git: GitSettings = Field(default_factory=GitSettings)
     approvals: ApprovalSettings = Field(default_factory=ApprovalSettings)
     context: ContextSettings = Field(default_factory=ContextSettings)
+    integrations: IntegrationSettings = Field(default_factory=IntegrationSettings)
