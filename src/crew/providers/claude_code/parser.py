@@ -64,6 +64,18 @@ def _load_envelope(stdout: str) -> dict[str, Any]:
     return data
 
 
+_USAGE_LIMIT = re.compile(
+    r"(hit your .{0,40}limit|usage limit|rate limit|rate_limit|too many requests|\b429\b"
+    r"|overloaded)",
+    re.IGNORECASE,
+)
+
+
+def is_usage_limit(text: str) -> bool:
+    """True for subscription/usage limits and API rate limiting (not retryable now)."""
+    return bool(_USAGE_LIMIT.search(text or ""))
+
+
 def extract_json_object(text: str) -> dict[str, Any]:
     """Parse a JSON object from free text (bare, fenced, or embedded)."""
     candidates = [text.strip()]
@@ -87,6 +99,12 @@ def parse_cli_output(stdout: str) -> ParsedResult:
     result_text = envelope.get("result") if isinstance(envelope.get("result"), str) else ""
     if envelope.get("is_error") or envelope.get("subtype") not in (None, "success"):
         detail = result_text or envelope.get("subtype") or "unknown error"
+        if is_usage_limit(detail):
+            raise ProviderError(
+                f"Claude usage limit reached: {detail}"[:2000],
+                kind="rate_limited",
+                hint="Wait until the limit resets, then continue with `crew retry <run-id>`.",
+            )
         raise ProviderError(f"Claude CLI reported an error: {detail}"[:2000], kind="provider_error")
 
     structured = envelope.get("structured_output")

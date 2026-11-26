@@ -722,3 +722,26 @@ def test_changes_outside_the_plan_are_reported(make_orch):
         "Outside the plan: pom.xml"
         in (orch.p.paths.run_dir(run.id) / "implementation.md").read_text()
     )
+
+
+def test_usage_limit_stops_the_run_without_retries_and_is_resumable(make_orch):
+    from crew.domain.errors import ProviderError
+
+    limited = {"on": True}
+
+    def implementer(req: AgentRequest) -> dict:
+        if limited["on"] and req.task_key == "part-b":
+            raise ProviderError("Claude usage limit reached: resets 5pm", kind="rate_limited")
+        return default_implementer(req)
+
+    fake = FakeProvider().on(Role.IMPLEMENTER, implementer)
+    fake.on(Role.DIRECTOR, plan_with(("part-a", []), ("part-b", []), ("part-c", ["part-b"])))
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.FAILED
+    assert "usage limit" in run.failure_reason and "crew retry" in run.failure_reason
+    assert orch.store.get_task(run.id, "part-b").attempt == 1  # not retried into the limit
+
+    limited["on"] = False  # the limit reset
+    run = orch.retry(run.id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL

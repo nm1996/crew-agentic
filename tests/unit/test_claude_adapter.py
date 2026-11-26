@@ -265,3 +265,19 @@ def test_profile_sets_model_and_effort_per_role(tmp_path):
     assert _value(implementer, "--model") == "sonnet"
     default = build_argv(CONFIG.provider.claude_code, make_request(Role.DIRECTOR, tmp_path), "c")
     assert "--model" not in default and "--effort" not in default
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "You've hit your 5-hour limit · resets 5:20pm (Europe/Belgrade)",
+        "Error: 429 Too Many Requests",
+        "API Error: rate_limit_error",
+        "Overloaded",
+    ],
+)
+def test_usage_limits_are_classified(text):
+    with pytest.raises(ProviderError) as info:
+        parse_cli_output(json.dumps({"is_error": True, "subtype": "success", "result": text}))
+    assert info.value.kind == "rate_limited"
+    assert "crew retry" in info.value.hint

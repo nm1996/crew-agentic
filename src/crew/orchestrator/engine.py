@@ -44,6 +44,7 @@ from crew.domain.errors import (
     MergeConflictError,
     PlanValidationError,
     PreconditionError,
+    ProviderError,
 )
 from crew.domain.task_graph import (
     RESERVED_PREFIX,
@@ -121,6 +122,7 @@ class Orchestrator:
         self.provider = provider
         self.runtime = AgentRuntime(project.store, provider, project.config)
         self.notify: Notify = notify or (lambda _msg: None)
+        self._rate_limited = False
         self._handlers: dict[RunState, Callable[[Run], None]] = {
             RunState.CREATED: self._start,
             RunState.ANALYZING: self._analyze,
@@ -406,6 +408,12 @@ class Orchestrator:
         if self.store.is_cancel_requested(run.id):
             raise RunCancelled
         unfinished = [t for t in tasks if t.status != TaskStatus.COMPLETED]
+        if unfinished and self._rate_limited:
+            reason = next((t.failure_reason for t in tasks if t.failure_reason), "")
+            raise CrewError(
+                f"stopped: {reason or 'Claude usage limit reached'}. Completed tasks are kept; "
+                "continue with `crew retry <run-id>` after the limit resets."
+            )
         if unfinished:
             summary = ", ".join(
                 f"{t.key}={t.status}" + (f" ({t.failure_reason})" if t.failure_reason else "")
@@ -416,6 +424,7 @@ class Orchestrator:
         self._transition(run.id, RunState.INTEGRATING, f"{len(tasks)} task(s) completed")
 
     async def _implement_async(self, run: Run) -> None:
+        self._rate_limited = False
         limit = self.config.execution.max_implementers
         running: dict[str, asyncio.Task[None]] = {}
         try:
@@ -442,6 +451,8 @@ class Orchestrator:
                     if statuses[t.key] is not TaskStatus.BLOCKED
                     and is_ready(t.dependencies, statuses)
                 ]
+                if self._rate_limited:
+                    ready = []  # let running tasks finish; dispatch nothing new
                 for t in ready:
                     if t.status == TaskStatus.PENDING:
                         t = self.store.set_task_status(t, TaskStatus.READY)
@@ -566,8 +577,14 @@ class Orchestrator:
             raise
         except CrewError as exc:
             failures = task.failures + 1
-            retry = failures < self.config.execution.max_task_attempts and not isinstance(
-                exc, BudgetExceededError | MergeConflictError
+            rate_limited = isinstance(exc, ProviderError) and exc.kind == "rate_limited"
+            if rate_limited:
+                # Every other agent would hit the same limit: stop dispatching new work.
+                self._rate_limited = True
+            retry = (
+                failures < self.config.execution.max_task_attempts
+                and not rate_limited
+                and not isinstance(exc, BudgetExceededError | MergeConflictError)
             )
             self.store.set_task_status(
                 task,

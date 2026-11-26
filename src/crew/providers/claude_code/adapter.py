@@ -35,7 +35,7 @@ from pathlib import Path
 from crew.config.schema import ClaudeCodeSettings, role_settings
 from crew.domain.errors import ProviderError
 from crew.providers.base import AgentRequest, AgentResult, ProcessStarted
-from crew.providers.claude_code.parser import parse_cli_output
+from crew.providers.claude_code.parser import is_usage_limit, parse_cli_output
 from crew.security.redaction import redact
 from crew.system.processes import (
     process_started_at,
@@ -197,6 +197,12 @@ class ClaudeCodeProvider:
         out_text = stdout[:MAX_CAPTURE_BYTES].decode("utf-8", errors="replace")
         err_text = redact(stderr[-4000:].decode("utf-8", errors="replace")).strip()
         if proc.returncode != 0 and not out_text.strip():
+            if is_usage_limit(err_text):
+                raise ProviderError(
+                    f"Claude usage limit reached: {err_text}"[:2000],
+                    kind="rate_limited",
+                    hint="Wait until the limit resets, then continue with `crew retry <run-id>`.",
+                )
             raise ProviderError(
                 f"Claude CLI exited with code {proc.returncode}: {err_text or 'no stderr'}",
                 kind="process_error",
