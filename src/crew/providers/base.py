@@ -34,6 +34,7 @@ class AgentRequest:
     run_id: str
     execution_id: str
     task_key: str | None = None
+    max_budget_usd: float | None = None  # per-execution spending cap, if any
 
 
 @dataclass

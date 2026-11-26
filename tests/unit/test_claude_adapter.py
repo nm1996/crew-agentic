@@ -73,6 +73,7 @@ def test_never_bypasses_permissions(role, tmp_path):
     assert "dangerously" not in joined
     assert "bypassPermissions" not in joined
     assert "--restricted" in argv
+    assert "--strict-mcp-config" in argv
     assert _value(argv, "--permission-prompts") == "none"
     assert "Read(**/.env)" in _value(argv, "--disallowedTools")
     json.loads(_value(argv, "--json-schema"))
@@ -173,3 +174,34 @@ def test_missing_executable_has_actionable_error(tmp_path):
         provider.resolve_executable()
     assert info.value.kind == "not_installed"
     assert info.value.hint
+
+
+def test_security_flags_precede_free_text(tmp_path):
+    """A mangled free-text argument must never be able to drop a security flag."""
+    argv = build_argv(
+        CONFIG.provider.claude_code, make_request(Role.IMPLEMENTER, tmp_path), "claude"
+    )
+    first_free_text = min(argv.index("--json-schema"), argv.index("--append-system-prompt"))
+    for flag in (
+        "--restricted",
+        "--strict-mcp-config",
+        "--permission-prompts",
+        "--permission-mode",
+        "--tools",
+        "--allowedTools",
+        "--disallowedTools",
+    ):
+        assert argv.index(flag) < first_free_text, flag
+
+
+def test_restricted_cannot_be_disabled():
+    from crew.domain.errors import ConfigError
+
+    with pytest.raises(ConfigError):
+        parse_config(
+            {
+                "version": 1,
+                "project": {"name": "t"},
+                "provider": {"claude_code": {"restricted": False}},
+            }
+        )

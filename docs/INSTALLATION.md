@@ -70,7 +70,7 @@ See [CONFIGURATION.md](CONFIGURATION.md).
 | Symptom | Fix |
 |---|---|
 | `doctor`: *Claude Code CLI not found* | Install Claude Code, make sure `claude` is on `PATH`, or set `provider.claude_code.executable` to its absolute path. |
-| `doctor`: *Claude CLI flags missing* | Update Claude Code (`claude update`). If only `--restricted` is missing: `crew configure provider.claude_code.restricted=false`. |
+| `doctor`: *Claude CLI flags missing* | Update Claude Code (`claude update`). CREW refuses to run agents without `--restricted` and `--strict-mcp-config`. |
 | `doctor`: *could not detect a login* | Run `claude` once interactively and log in, or export `ANTHROPIC_API_KEY`. Detection is best-effort; this is a warning only. |
 | `approve-plan`: *working tree has uncommitted changes* | Commit your work. CREW never stashes or resets it for you. |
 | `error: Another CREW process is currently driving this run` | Another terminal is running that run. Wait, or `crew stop <run-id>`. |

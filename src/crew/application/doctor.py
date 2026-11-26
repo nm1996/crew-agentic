@@ -28,6 +28,8 @@ REQUIRED_CLAUDE_FLAGS = (
     "--allowedTools",
     "--no-session-persistence",
     "--append-system-prompt",
+    "--restricted",
+    "--strict-mcp-config",
 )
 
 
@@ -174,8 +176,6 @@ def check_claude(config: CrewConfig | None) -> list[Check]:
     help_proc = _run([path, "--help"])
     help_text = help_proc.stdout if help_proc else ""
     flags = list(REQUIRED_CLAUDE_FLAGS)
-    if settings is None or settings.restricted:
-        flags.append("--restricted")
     missing = [f for f in flags if f not in help_text]
     if missing:
         checks.append(
@@ -183,8 +183,8 @@ def check_claude(config: CrewConfig | None) -> list[Check]:
                 "Claude CLI flags",
                 miss,
                 "missing: " + ", ".join(missing),
-                "Update Claude Code (`claude update`). If only --restricted is missing, set "
-                "provider.claude_code.restricted=false.",
+                "Update Claude Code (`claude update`). CREW requires these flags to isolate "
+                "agents and will not run without them.",
             )
         )
     else:

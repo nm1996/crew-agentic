@@ -29,9 +29,9 @@ class ClaudeCodeSettings(_Strict):
     timeout_seconds: int = Field(default=1800, ge=30, le=4 * 3600)
     model: str | None = None
     max_budget_usd: float | None = Field(default=None, gt=0)
-    # --restricted confines file tools to the working directory and refuses
-    # permission bypass. Keep it on unless your CLI version does not support it.
-    restricted: bool = True
+    # Always passed as --restricted. Kept as a key only so older configs that set
+    # it still load; it cannot be turned off.
+    restricted: Literal[True] = True
     # Bash permission rules granted to Implementers in addition to file edits,
     # in Claude Code permission-rule syntax, e.g. "Bash(uv run pytest:*)".
     implementer_bash_rules: list[str] = Field(default_factory=list)

@@ -15,7 +15,7 @@ provider:
     timeout_seconds: 1800       # per agent execution (30 … 14400)
     model: null                 # e.g. "opus", "sonnet"; null = CLI default
     max_budget_usd: null        # per agent execution, passed as --max-budget-usd
-    restricted: true            # pass --restricted (confine file tools to the worktree)
+    restricted: true            # always on: --restricted --strict-mcp-config (cannot be disabled)
     implementer_bash_rules: []  # e.g. ["Bash(uv run pytest:*)", "Bash(npm test:*)"]
     reviewer_bash_rules: []     # same syntax; lets the Reviewer run checks
 execution:

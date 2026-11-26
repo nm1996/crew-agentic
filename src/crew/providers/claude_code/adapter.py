@@ -2,10 +2,11 @@
 
 Invocation (flags verified against ``claude --help`` of CLI 2.1.x):
 
-    claude -p --output-format json --no-session-persistence
+    claude -p --restricted --strict-mcp-config
            --permission-prompts none --permission-mode <dontAsk|acceptEdits>
+           --no-session-persistence --output-format json
            --tools <list> --allowedTools <list> [--disallowedTools <list>]
-           [--restricted] [--model M] [--max-budget-usd N]
+           [--model M] [--max-budget-usd N]
            --json-schema <schema> --append-system-prompt <role instructions>
     (prompt on stdin)
 
@@ -15,8 +16,10 @@ Permission enforcement:
 * Implementers additionally get Edit/Write in ``acceptEdits`` mode; Bash only via
   explicitly configured, scoped rules.
 * ``--permission-prompts none`` means nobody can approve an escalation mid-run.
-* ``--restricted`` (default on) confines file tools to the working directory,
-  which is always a CREW-owned worktree, and refuses permission bypass.
+* ``--restricted`` (always on) confines file tools to the working directory,
+  which is always a CREW-owned worktree, ignores user/project/local settings
+  files (so repository hooks and permission rules cannot widen access) and
+  refuses permission bypass. ``--strict-mcp-config`` keeps MCP servers out.
 * ``--dangerously-skip-permissions`` / ``bypassPermissions`` are never used.
 """
 
@@ -41,6 +44,12 @@ MAX_CAPTURE_BYTES = 5_000_000
 
 
 def build_argv(settings: ClaudeCodeSettings, request: AgentRequest, executable: str) -> list[str]:
+    """Build the CLI argument list.
+
+    Security-relevant flags come first and free text (JSON schema, role prompt)
+    last, so no quoting accident in a long free-text argument can ever cause a
+    later security flag to be dropped.
+    """
     caps = request.capabilities
     tools = list(READ_TOOLS)
     allowed = list(READ_TOOLS)
@@ -53,28 +62,32 @@ def build_argv(settings: ClaudeCodeSettings, request: AgentRequest, executable: 
     argv = [
         executable,
         "-p",
-        "--output-format",
-        "json",
-        "--no-session-persistence",
+        "--restricted",  # confine file tools, ignore user/project settings, refuse bypass
+        "--strict-mcp-config",  # no MCP servers from the developer's configuration
         "--permission-prompts",
         "none",
         "--permission-mode",
         "acceptEdits" if caps.can_edit_files else "dontAsk",
+        "--no-session-persistence",
+        "--output-format",
+        "json",
+    ]
+    # List options are joined into one value each and followed by another option,
+    # so they cannot swallow other arguments.
+    argv += ["--tools", ",".join(tools), "--allowedTools", ",".join(allowed)]
+    if caps.deny_read_globs:
+        argv += ["--disallowedTools", ",".join(f"Read({g})" for g in caps.deny_read_globs)]
+    if settings.model:
+        argv += ["--model", settings.model]
+    budget = request.max_budget_usd or settings.max_budget_usd
+    if budget:
+        argv += ["--max-budget-usd", f"{budget:.2f}"]
+    argv += [
         "--json-schema",
         json.dumps(request.output_schema, separators=(",", ":")),
         "--append-system-prompt",
         request.instructions,
     ]
-    if settings.restricted:
-        argv.append("--restricted")
-    if settings.model:
-        argv += ["--model", settings.model]
-    if settings.max_budget_usd:
-        argv += ["--max-budget-usd", f"{settings.max_budget_usd:.2f}"]
-    # Variadic list options go last so they cannot swallow other arguments.
-    argv += ["--tools", ",".join(tools), "--allowedTools", ",".join(allowed)]
-    if caps.deny_read_globs:
-        argv += ["--disallowedTools", ",".join(f"Read({g})" for g in caps.deny_read_globs)]
     return argv
 
 
