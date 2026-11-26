@@ -46,17 +46,68 @@ run passes on Linux.
 | Scoped shell rules verified against the real CLI; opt-in smoke workflow on all OSes | Done (Linux verified; Windows/macOS need the API-key secret) | D20 |
 | Tag-driven GitHub releases | Done | Releases |
 
-## M9 — Candidates
+## M9 — Interactive permissions and integration adapters
+
+Goal: CREW works with the systems around the code (issue tracker, code host, review,
+documentation) through small, explicit adapters, and an agent that lacks a permission
+can ask for it instead of failing.
+
+### 1. Ask for a missing permission
+
+Today agents run with `--permission-prompts none`: anything outside the configured rules
+is denied and the agent must work around it. Instead:
+
+- CREW serves a local permission-prompt tool (`--permission-prompt-tool`, an MCP tool in
+  a CREW-owned helper process) that receives each denied request (tool + arguments).
+- The request is classified with the existing execution policy. DESTRUCTIVE and NETWORK
+  requests stay denied; everything else is shown to the developer: *allow once*,
+  *allow for this run* (added as a scoped rule), or *deny*.
+- Decisions are recorded as approvals (kind `PERMISSION`) and in the report. Without an
+  interactive terminal (CI, background runs) the behaviour stays "deny".
+- Concurrency: requests from parallel Implementers are queued; the agent waits (bounded
+  by its timeout).
+
+### 2. Integration adapters
+
+A small adapter interface per integration kind, next to `AgentProvider`, configured in
+`.crew/config.yaml` with credentials taken from environment variables (never stored):
+
+| Kind | Interface (sketch) | First adapters |
+|---|---|---|
+| Issue tracker | `fetch_issue(key) -> Issue`, `comment(key, text)`, `transition(key, state)` | Jira (REST v3) |
+| Code host | `push_branch(branch)`, `open_pull_request(branch, title, body) -> url` | GitHub (`gh`), GitLab |
+| Code review | `fetch_review_comments(pr) -> [Comment]`, `post_review(pr, findings)` | GitHub reviews |
+| Documentation | `fetch_page(ref) -> Markdown`, `publish_page(space, title, markdown)` | Confluence (REST), local Markdown folder |
+
+How they fit the workflow:
+
+- `crew run --issue PROJ-123` loads the issue (title, description, acceptance criteria)
+  as the request; linked Confluence pages are added to the Director's context through the
+  existing bounded context collector.
+- `crew publish <id> [--pr]` (explicit command, COMPLETED runs only) pushes the
+  integration branch and opens a PR whose body is the final report; the Reviewer's
+  findings can be posted as review comments.
+- On completion, an optional comment/transition is sent to the issue and the report can
+  be published as a documentation page.
+- Every outbound call is NETWORK in the execution policy: it happens only through these
+  adapters, only on explicit commands or configured completion hooks, and is recorded as
+  an event. "Never push automatically" stays true.
+
+### 3. Measured reference example
+
+A real run building a small Spring Boot CRUD service (User, Product, Order, Cart; H2),
+with cost, duration and agent counts, documented in `docs/examples/` and used to tune
+defaults (see [examples](examples/README.md)).
+
+## M10 — Candidates
 
 Ordered by value; none started.
 
-1. **Explicit `crew publish <id> [--pr]`** — push only `crew/<run>/integration` and open a
-   PR, on explicit command, keeping "never push automatically".
-2. **Claude Agent SDK provider** behind `AgentProvider`, with programmatic `can_use_tool`
+1. **Claude Agent SDK provider** behind `AgentProvider`, with programmatic `can_use_tool`
    permission decisions and streaming progress.
-3. **Observability:** `stream-json` tool-use events per execution, `crew logs -f`.
-4. **Interactive approvals** (`crew run --interactive`), later a TUI.
-5. **PyPI release** with trusted publishing on tags.
+2. **Observability:** `stream-json` tool-use events per execution, `crew logs -f`.
+3. **Interactive approvals** (`crew run --interactive`), later a TUI.
+4. **PyPI release** with trusted publishing on tags.
 
 ## M0 — Foundation
 
