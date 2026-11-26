@@ -14,8 +14,8 @@ All notable changes to this project are documented here. The format follows
 
 - Cost profiles (`provider.claude_code.profile: default|balanced|economy`), per-role model
   and `--effort` overrides (`provider.claude_code.roles`), and
-  `execution.review_context: summary`. Measured: economy cut the reference run from
-  $3.34 to $1.28.
+  `execution.review_context: summary`. Measured on the reference run: default $3.34,
+  balanced $2.87, economy $1.28, all independently verified.
 - Merge conflicts are resolved by an Implementer (`execution.conflict_resolution`);
   changes outside a task's planned files are reported.
 

@@ -162,8 +162,9 @@ open the files they need with their Read tool. On large changes this removes ten
 thousands of prompt tokens per agent.
 
 Measured on the reference run ([examples/spring-boot-crud.md](examples/spring-boot-crud.md#cost-profiles-compared)):
-`default` $3.34, `economy` $1.28 for an equally working service (fewer tests, shallower
-review).
+`default` $3.34, `balanced` $2.87, `economy` $1.28 — all three produced a working service;
+the cheaper profiles wrote fewer tests and reviewed less deeply. The Implementer model is
+the main cost lever.
 
 ## Run budget
 

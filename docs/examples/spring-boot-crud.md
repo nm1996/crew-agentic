@@ -141,16 +141,25 @@ The same request and setup, re-run with the cost controls added in 0.4.0
 Every result was verified independently the same way: fresh clone, `mvn -q -B verify`,
 `mvn spring-boot:run`, and the 25-step black-box API script.
 
-| | `default` (all Opus, full diff) | `economy` (Sonnet/Haiku, summary) | `balanced` |
+| | `default` (all Opus, full diff) | `balanced` (Opus impl., Sonnet review) | `economy` (Sonnet/Haiku, summary) |
 |---|---|---|---|
-| Cost | $3.34 | **$1.28 (−62 %)** | pending² |
-| Wall-clock time | 14 min | 13.5 min | |
-| Tasks in plan | 3 (chain) | 6 (scaffold → users ∥ products → carts ∥ orders → docs) | 5–6 |
-| Generated | 42 files, 2,236 lines | 34 files, 1,681 lines | |
-| Integration tests | **69** | 36 | |
-| Black-box API checks | 25/25 | **25/25** | |
-| Review findings | 5 (1 medium, 4 low) | 1 (low) | |
-| Evaluator | ACCEPT | NEEDS_CHANGES³ | |
+| Cost | $3.34 | $2.87 (−14 %) | **$1.28 (−62 %)** |
+| Wall-clock time | 14 min | ~10 min² | 13.5 min |
+| Tasks in plan | 3 (chain) | 5 (scaffold → users ∥ products → carts ∥ orders) | 6 (as balanced + docs) |
+| Generated | 42 files, 2,236 lines | 41 files, 2,118 lines | 34 files, 1,681 lines |
+| Integration tests | **69** | 59 | 36 |
+| Black-box API checks | 25/25 | 25/25 | 25/25 |
+| Review findings | 5 (1 medium, 4 low) | 1 (low) | 1 (low) |
+| Evaluator | ACCEPT | ACCEPT | NEEDS_CHANGES³ |
+
+Cost by role:
+
+| Role | default | balanced | economy |
+|---|---|---|---|
+| Director | $0.10 (Opus) | $0.17 (Opus, medium) | $0.08 (Sonnet) |
+| Implementers | $2.15 (3 tasks) | $2.45 (5 tasks) | $1.01 (6 tasks, Sonnet) |
+| Reviewer | $0.56 | $0.11 (Sonnet) | $0.11 (Sonnet, low) |
+| Evaluator | $0.52 | $0.14 (Sonnet, low) | $0.08 (Haiku, low) |
 
 Economy per role:
 
@@ -163,6 +172,15 @@ Economy per role:
 
 What this shows:
 
+- **The Implementer model is the cost lever.** Review and evaluation on Sonnet with the
+  summary context cost $0.25 instead of $1.08 (−77 %) in both cheaper profiles, but in
+  `balanced` the Opus Implementers cost *more* than in `default` ($2.45 vs $2.15): the
+  Director split the work into 5 tasks instead of 3, and every task pays a fixed
+  overhead of reading the project, building and testing (~$0.4–0.7 each). `effort:
+  medium` did not offset that.
+- **More, smaller tasks buy wall-clock time, not money.** `balanced` finished in about
+  10 minutes thanks to two parallel pairs, but cost more implementation money than the
+  3-task chain.
 - **The economy profile produced an equally working service for 38 % of the cost.** The
   price is depth: half as many tests and a much shallower review (one finding in 11 s,
   against five from the Opus reviewer).
@@ -171,19 +189,26 @@ What this shows:
   at $0.08.
 - **A cheaper Director planned for more parallelism** (6 tasks, two parallel pairs). That
   is faster in principle but raises the merge-conflict risk — see the next point.
-- ² **The first `balanced` run found a CREW bug, the second hit the subscription limit.**
-  Two parallel Implementers both added the same Maven plugin to `pom.xml` (with different
-  comments); Git could not merge them and CREW failed the run. CREW now resolves such
-  conflicts with an agent (D22). The re-run then stopped at the Claude subscription's
-  5-hour usage limit, which CREW now recognises instead of retrying into it; the run is
-  resumable with `crew retry` and this row will be filled in afterwards.
+- ² **`balanced` took three attempts, each exercising CREW.** The first run failed: two
+  parallel Implementers both added the same Maven plugin to `pom.xml` (with different
+  comments), Git could not merge them, and CREW gave up. CREW now resolves such conflicts
+  with an agent (D22). The second run stopped at the Claude subscription's 5-hour usage
+  limit after planning and scaffolding; CREW now recognises the limit instead of retrying
+  into it (the cut-off calls cost $0). After the reset, `crew retry` continued from
+  IMPLEMENTING with the scaffold kept and completed in 8 minutes. Time shown is the sum of
+  the working phases; cost is the whole run.
 - ³ The Haiku Evaluator asked for changes because startup on port 8080 was not evidenced
   and two test classes clean up less carefully than the others. Both are fair; neither is
   a functional defect (the service passed all API checks).
 
-**Recommendation:** use `economy` for prototypes and well-specified CRUD-style work, and
-keep the strongest model for Implementers (`roles: {implementer: {model: opus}}`) when
-test depth matters; that keeps most of the savings on planning, review and evaluation.
+**Recommendation:**
+
+- `economy` for prototypes and well-specified CRUD-style work: same working result for
+  about a third of the price.
+- When test depth matters, `balanced`: Opus Implementers, cheap review and evaluation.
+  Expect savings only on review/evaluation; if the Director plans many small tasks the
+  implementation share can grow.
+- Use `default` when you want the most thorough review (5 findings vs 1).
 
 ## About the cost figures
 
