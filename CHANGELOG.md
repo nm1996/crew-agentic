@@ -6,10 +6,39 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-26
+
+Hardening and cross-platform release, driven by an independent review of 0.1.0.
+
 ### Added
+- Windows and macOS support; CI on Linux, macOS and Windows with Python 3.12/3.13.
+- `crew retry <run-id>`: retry a FAILED run from the stage it failed in.
+- `crew cleanup <run-id>|--all [--branches]`: remove finished runs' worktrees and merged
+  CREW branches.
+- `execution.max_run_budget_usd`: per-run spending limit; cost shown in `crew status`.
+- Verification commands may be argv lists; scoped `PowerShell(...)` rules.
+- `crew.system` platform layer (psutil-based process trees, portable file lock).
 - MIT license.
 
-## [0.1.0] - 2026-11-26
+### Changed
+- `--restricted` is mandatory and `--strict-mcp-config` is always passed; security flags
+  precede free-text arguments.
+- Reviewer and Evaluator run in disposable snapshot worktrees.
+- Correction tasks are named `crew-fix-<n>`; the `crew-` prefix is reserved in plans.
+- Git commands are recorded per run; all git calls run with hooks disabled.
+
+### Fixed
+- Secret redaction could corrupt stored JSON and break a run's report.
+- A cancel requested during planning fired only after the plan was approved.
+- Agent processes could outlive a terminated CREW process; `stop` did not reconcile them.
+- Unexpected errors left tasks or executions stuck in RUNNING.
+- Non-UTF-8 git output could fail a run; renamed paths were mis-parsed.
+- Git write commands were not blocked in the developer's worktree.
+- New secret files created by agents could be committed to CREW branches.
+- `info/exclude` was written to the wrong place in linked worktrees.
+- `execution.preserve_worktrees_on_failure` was ignored.
+
+## [0.1.0] - 2026-11-26 (initial MVP)
 
 ### Added
 - `crew` CLI: `init`, `doctor`, `configure`, `run`, `plan`, `approve-plan`, `reject-plan`,
