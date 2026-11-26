@@ -16,6 +16,8 @@ from crew.config.schema import CrewConfig
 from crew.domain.errors import CrewError, ProviderError
 from crew.persistence.database import schema_status
 from crew.providers.claude_code.adapter import resolve_cli_command
+from crew.security.sandbox import SandboxSettings
+from crew.security.sandbox import check_available as sandbox_problem
 from crew.workspace.git import Git
 
 MIN_PYTHON = (3, 12)
@@ -127,6 +129,7 @@ def check_project(cwd: Path) -> tuple[list[Check], CrewConfig | None]:
     except CrewError as exc:
         return [Check("Configuration", Level.FAIL, exc.message, "Fix .crew/config.yaml.")], None
     checks = [Check("Configuration", Level.OK, f"provider={config.provider.default}")]
+    checks.append(check_sandbox(config))
     current, head = schema_status(paths.db_file)
     if current == head:
         checks.append(Check("Database", Level.OK, f"schema {current}"))
@@ -150,6 +153,33 @@ def check_project(cwd: Path) -> tuple[list[Check], CrewConfig | None]:
                 Check(label, Level.FAIL, f"{directory} missing or not writable", "Run `crew init`.")
             )
     return checks, config
+
+
+def check_sandbox(config: CrewConfig) -> Check:
+    execution = config.execution
+    settings = SandboxSettings(
+        mode=execution.sandbox,
+        image=execution.sandbox_image,
+        network=execution.sandbox_network,
+    )
+    if settings.mode == "none":
+        level = Level.WARN if execution.verification_commands else Level.OK
+        return Check(
+            "Verification sandbox",
+            level,
+            "none" + (" (verification runs agent-written code unsandboxed)" if level else ""),
+            "Set execution.sandbox=bwrap (Linux) or docker." if level is Level.WARN else "",
+        )
+    problem = sandbox_problem(settings)
+    if problem:
+        return Check(
+            "Verification sandbox",
+            Level.FAIL,
+            f"{settings.mode}: {problem}",
+            "Install/enable it, or set execution.sandbox=none.",
+        )
+    net = "network on" if settings.network else "no network"
+    return Check("Verification sandbox", Level.OK, f"{settings.mode} ({net})")
 
 
 def check_claude(config: CrewConfig | None) -> list[Check]:

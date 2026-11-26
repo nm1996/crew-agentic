@@ -18,6 +18,7 @@ import uuid
 from collections.abc import Callable, Coroutine, Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, TypeVar
 
 from crew.agents import payloads
@@ -58,7 +59,15 @@ from crew.persistence.models import JsonMixin, Run, Task, utcnow
 from crew.persistence.store import Store
 from crew.providers.base import AgentProvider
 from crew.reporting import renderer
-from crew.security.execution_policy import parse_verification_command, run_command
+from crew.security.execution_policy import (
+    classify_command,
+    parse_verification_command,
+    run_command,
+)
+from crew.security.redaction import redact_args
+from crew.security.sandbox import SandboxSettings, resolves_on_host
+from crew.security.sandbox import check_available as check_sandbox
+from crew.security.sandbox import wrap as wrap_in_sandbox
 from crew.workspace.git import Git
 from crew.workspace.worktrees import WorkspaceManager
 
@@ -602,12 +611,30 @@ class Orchestrator:
         )
         self._transition(run.id, RunState.REVIEWING)
 
+    def _sandbox_settings(self) -> SandboxSettings:
+        execution = self.config.execution
+        return SandboxSettings(
+            mode=execution.sandbox,
+            image=execution.sandbox_image,
+            network=execution.sandbox_network,
+            writable_paths=tuple(Path(p) for p in execution.sandbox_writable_paths),
+        )
+
     async def _verify(self, run: Run, cwd: Any) -> None:
         execution = self.config.execution
+        if not execution.verification_commands:
+            return
+        sandbox = self._sandbox_settings()
+        # Fail closed: never fall back to running agent-written code unsandboxed.
+        if problem := await asyncio.to_thread(check_sandbox, sandbox):
+            raise PreconditionError(
+                f"verification sandbox '{sandbox.mode}' is unavailable: {problem}",
+                hint="Fix the sandbox (see `crew doctor`), then `crew retry <run-id>`.",
+            )
         for command in execution.verification_commands:
-            argv = parse_verification_command(command)
+            argv = parse_verification_command(command, resolve=resolves_on_host(sandbox.mode))
             result = await run_command(
-                argv,
+                wrap_in_sandbox(argv, Path(cwd), sandbox),
                 cwd=cwd,
                 timeout_seconds=execution.command_timeout_seconds,
                 output_limit_bytes=execution.command_output_limit_bytes,
@@ -615,8 +642,9 @@ class Orchestrator:
             self.store.record_command(
                 run_id=run.id,
                 purpose="verification",
-                category=result.category,
-                argv_json=JsonMixin.dumps(result.argv),
+                category=classify_command(argv),
+                sandbox=sandbox.mode,
+                argv_json=JsonMixin.dumps(redact_args(argv)),
                 cwd=result.cwd,
                 exit_code=result.exit_code,
                 timed_out=result.timed_out,
@@ -627,7 +655,8 @@ class Orchestrator:
             )
             status = "timed out" if result.timed_out else f"exit {result.exit_code}"
             shown = command if isinstance(command, str) else " ".join(command)
-            self.notify(f"  {shown} → {status}")
+            where = "" if sandbox.mode == "none" else f" [sandbox: {sandbox.mode}]"
+            self.notify(f"  {shown}{where} → {status}")
 
     def _integrated_diff(self, run: Run) -> str:
         return self.p.git.diff(run.base_commit, self.p.workspace.integration_branch(run.id))

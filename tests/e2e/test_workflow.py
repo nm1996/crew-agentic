@@ -596,3 +596,38 @@ def test_cleanup_refuses_active_runs(make_orch):
     run = orch.start_run("x")
     with pytest.raises(InvalidTransitionError):
         orch.cleanup(run.id)
+
+
+@pytest.mark.skipif(
+    __import__("crew.security.sandbox", fromlist=["x"]).check_available(
+        __import__("crew.security.sandbox", fromlist=["x"]).SandboxSettings(mode="bwrap")
+    )
+    is not None,
+    reason="bubblewrap not usable here",
+)
+def test_verification_runs_inside_the_sandbox(make_orch, configure_project):
+    probe = [
+        sys.executable,
+        "-c",
+        "import socket\n"
+        "try:\n socket.create_connection(('1.1.1.1', 53), 2)\n"
+        "except OSError:\n print('offline')",
+    ]
+    project = configure_project(execution={"verification_commands": [probe], "sandbox": "bwrap"})
+    orch = make_orch(project, FakeProvider())
+    run = orch.approve_plan(orch.start_run("x").id)
+    command = orch.store.commands(run.id, purpose="verification")[0]
+    assert command.sandbox == "bwrap" and command.exit_code == 0
+    assert "offline" in command.stdout
+
+
+def test_unavailable_sandbox_fails_closed(make_orch, configure_project, monkeypatch):
+    monkeypatch.setattr("crew.orchestrator.engine.check_sandbox", lambda _s: "not installed")
+    project = configure_project(
+        execution={"verification_commands": [[sys.executable, "-V"]], "sandbox": "bwrap"}
+    )
+    orch = make_orch(project, FakeProvider())
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.FAILED
+    assert "sandbox 'bwrap' is unavailable" in run.failure_reason
+    assert orch.store.commands(run.id, purpose="verification") == []  # nothing ran unsandboxed

@@ -153,12 +153,14 @@ def _split(command: str) -> list[str]:
     ]
 
 
-def parse_verification_command(command: str | list[str]) -> list[str]:
+def parse_verification_command(command: str | list[str], *, resolve: bool = True) -> list[str]:
     """Turn a configured verification command into a safe argv.
 
     Accepts a string (split like a shell would, but never run by one) or an
-    explicit argument list, which is the most portable form. The program is
-    resolved on ``PATH`` (honouring ``PATHEXT`` on Windows).
+    explicit argument list, which is the most portable form. With ``resolve``
+    the program is resolved on the host ``PATH`` (honouring ``PATHEXT`` on
+    Windows); it is skipped for container sandboxes, where the program lives in
+    the image.
     """
     argv = list(command) if isinstance(command, list) else _split(command)
     shown = command if isinstance(command, str) else " ".join(command)
@@ -174,7 +176,7 @@ def parse_verification_command(command: str | list[str]) -> list[str]:
         raise PolicyViolationError(
             f"verification command {shown!r} uses shell operators; commands run without a shell"
         )
-    resolved = shutil.which(argv[0])
+    resolved = shutil.which(argv[0]) if resolve else None
     if resolved:
         argv[0] = resolved
         if resolved.casefold().endswith((".cmd", ".bat")) and any(

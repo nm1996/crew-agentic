@@ -74,6 +74,8 @@ def render_commands(commands: list[CommandExecution]) -> str:
     for c in commands:
         argv = " ".join(json.loads(c.argv_json))
         status = "TIMED OUT" if c.timed_out else f"exit {c.exit_code}"
+        if c.sandbox and c.sandbox != "none":
+            status += f", sandbox: {c.sandbox}"
         lines += [
             f"## Cycle {c.cycle}: `{argv}` — **{status}** ({c.duration_seconds}s)",
             "",

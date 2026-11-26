@@ -196,6 +196,7 @@ class CommandExecution(Base):
     stdout: Mapped[str | None] = mapped_column(Text)  # redacted, truncated
     stderr: Mapped[str | None] = mapped_column(Text)  # redacted, truncated
     cycle: Mapped[int] = mapped_column(Integer, default=0)
+    sandbox: Mapped[str | None] = mapped_column(String(16))  # none | bwrap | docker
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

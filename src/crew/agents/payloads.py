@@ -87,6 +87,8 @@ def _commands_md(commands: list[CommandExecution]) -> str:
     for c in commands:
         argv = " ".join(json.loads(c.argv_json))
         status = "TIMED OUT" if c.timed_out else f"exit {c.exit_code}"
+        if c.sandbox and c.sandbox != "none":
+            status += f", sandbox {c.sandbox}"
         tail = (c.stdout or "")[-3000:] + ("\n" + c.stderr[-2000:] if c.stderr else "")
         out += [f"### `{argv}` — {status}", "", "```", tail.strip(), "```", ""]
     return "\n".join(out)

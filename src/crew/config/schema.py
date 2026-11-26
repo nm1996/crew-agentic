@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 CONFIG_VERSION = 1
 MAX_IMPLEMENTERS_HARD_LIMIT = 2
@@ -71,6 +71,17 @@ class ExecutionSettings(_Strict):
     # Each entry is a string (split like a shell, never run by one) or an
     # explicit argv list such as ["python", "-m", "pytest"] (most portable).
     verification_commands: list[str | list[str]] = Field(default_factory=list)
+    # Isolation for verification commands; see crew/security/sandbox.py.
+    sandbox: Literal["none", "bwrap", "docker"] = "none"
+    sandbox_image: str | None = None  # required for docker
+    sandbox_network: bool = False
+    sandbox_writable_paths: list[str] = Field(default_factory=list)  # e.g. ["~/.cache/uv"]
+
+    @model_validator(mode="after")
+    def _docker_needs_image(self) -> ExecutionSettings:
+        if self.sandbox == "docker" and not self.sandbox_image:
+            raise ValueError("execution.sandbox_image is required when sandbox is 'docker'")
+        return self
 
 
 class GitSettings(_Strict):
