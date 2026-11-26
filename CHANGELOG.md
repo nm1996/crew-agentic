@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `crew run --file request.md`: read the request from a file.
+- Build and runtime files (`pom.xml`, Gradle, `requirements.txt`, `Dockerfile`, …) in
+  the Director's key-file context, within a 40 kB budget.
+- "Giving the Director input" in docs/USAGE.md.
+
 ## [0.5.0] - 2026-11-26
 
 Integrations and interactive permissions (M9).

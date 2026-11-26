@@ -36,6 +36,45 @@ crew accept <id> -m "LGTM"             # or: crew reject <id> -m "reason"
 git merge --no-ff crew/<id>/integration   # CREW never merges for you
 ```
 
+## Giving the Director input
+
+There are four channels, separated by how long the information stays valid:
+
+| What | How | Lifetime |
+|---|---|---|
+| **The task** — what to do | `crew run "…"`, `crew run --file request.md`, `--issue PROJ-1`, `--pr-comments 42` | one run |
+| **Project knowledge** — how work is done here | Markdown files in `.crew/context/` (created by `crew init` as `project.md`) | every run |
+| **Supporting documents** — specs, designs | `--doc docs/spec.md` (folder adapter) or `--doc <Confluence page>` | one run |
+| **The repository itself** | collected automatically (see below) | always |
+
+```bash
+crew run "Add pagination to /api/products, 20 per page by default"
+crew run --file specs/checkout.md "keep the public API unchanged"   # file + extra notes
+crew run --issue PROJ-123 --doc docs/checkout-design.md
+```
+
+`.crew/context/project.md` is the place for conventions, architecture rules and
+off-limits areas, e.g.:
+
+```markdown
+## Conventions
+- Java 21, Spring Boot 3; integration tests are *IT classes using MockMvc
+## Architecture
+- controller → service → repository; no logic in controllers
+## Off-limits
+- do not change db/migrations/ without asking
+```
+
+What CREW collects automatically from the base commit: the list of tracked files
+(secret files excluded), the last 15 commits, and excerpts of key files — guidance
+(`README`, `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`) and build/runtime definitions
+(`pyproject.toml`, `package.json`, `pom.xml`, Gradle files, `go.mod`, `Cargo.toml`,
+`Dockerfile`, compose files, …), up to 6 kB each and 40 kB in total. The Director can
+open any other tracked file itself.
+
+Keep the task short and concrete, put lasting rules in `.crew/context/`, and pass long
+specifications with `--doc` or `--file`.
+
 ## Commands
 
 | Command | Purpose |
@@ -44,7 +83,7 @@ git merge --no-ff crew/<id>/integration   # CREW never merges for you
 | `crew init [--name N] [--provider claude_code\|fake]` | Create `.crew/` in the current repository. Idempotent, never overwrites. |
 | `crew doctor` | Diagnose Python, Git, repository, config, database and Claude CLI. Exit 1 on any FAIL. |
 | `crew configure [key=value ...]` | Show config, or set dotted keys (validated before writing). Values are YAML: `2`, `true`, `["a", "b"]`. |
-| `crew run ["<request>"] [--issue KEY] [--doc REF]… [--pr-comments N]` | Create a run (from text, an issue or PR review comments, with linked docs), analyse, plan, stop at the plan gate. |
+| `crew run ["<request>"] [--file F] [--issue KEY] [--doc REF]… [--pr-comments N]` | Create a run (from text, an issue or PR review comments, with linked docs), analyse, plan, stop at the plan gate. |
 | `crew publish <id> [--pr] [--draft] [--review] [--docs] [--no-issue] [--yes]` | Share a COMPLETED run: PR, review, issue comment/transition, report page. See [INTEGRATIONS.md](INTEGRATIONS.md). |
 | `crew plan <id>` | Show the plan. |
 | `crew approve-plan <id> [-m note] [--no-continue]` | Approve and execute through to the final gate (`--no-continue`: record approval only, continue with `resume`). |
