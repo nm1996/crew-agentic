@@ -92,12 +92,16 @@ class FolderDocs:
         heading = next(
             (ln[2:].strip() for ln in text.splitlines() if ln.startswith("# ")), path.stem
         )
-        return DocPage(ref=ref, title=heading, body=text, url=str(path.relative_to(self.root)))
+        return DocPage(
+            ref=ref, title=heading, body=text, url=path.relative_to(self.root).as_posix()
+        )
 
     def publish_page(self, title: str, markdown: str) -> str:
         self.folder.mkdir(parents=True, exist_ok=True)
         path = self.folder / f"{slugify(title)}.md"
         if path.exists():
-            raise IntegrationError(f"{path.relative_to(self.root)} already exists; not overwriting")
+            raise IntegrationError(
+                f"{path.relative_to(self.root).as_posix()} already exists; not overwriting"
+            )
         path.write_text(markdown, encoding="utf-8")
-        return str(path.relative_to(self.root))
+        return path.relative_to(self.root).as_posix()
