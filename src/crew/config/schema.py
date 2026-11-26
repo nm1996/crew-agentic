@@ -160,6 +160,11 @@ class ApprovalSettings(_Strict):
     # Literal[True]: the MVP does not allow disabling mandatory approval gates.
     require_plan_approval: Literal[True] = True
     require_final_approval: Literal[True] = True
+    # When an agent asks for something outside its rules: "off" denies silently
+    # (default); "ask" asks the developer in the terminal. Destructive and network
+    # commands are denied either way.
+    permission_prompts: Literal["off", "ask"] = "off"
+    permission_timeout_seconds: int = Field(default=300, ge=10, le=3600)
 
 
 class ContextSettings(_Strict):

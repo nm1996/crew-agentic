@@ -745,3 +745,40 @@ def test_usage_limit_stops_the_run_without_retries_and_is_resumable(make_orch):
     limited["on"] = False  # the limit reset
     run = orch.retry(run.id)
     assert run.state == RunState.AWAITING_FINAL_APPROVAL
+
+
+def test_permission_requests_are_brokered_to_the_developer(make_orch, configure_project):
+    from crew.agents.permission_server import decide
+
+    project = configure_project(approvals={"permission_prompts": "ask"})
+    asked: list[str] = []
+    outcomes: list[str] = []
+
+    async def implementer(req: AgentRequest) -> dict:
+        # What Claude Code does when a command is outside the rules: call the MCP tool.
+        assert req.permission_dir is not None
+        for command in ("mvn -q verify", "mvn -q verify", "rm -rf /"):
+            d = await asyncio.to_thread(decide, "Bash", {"command": command}, req.permission_dir, 5)
+            outcomes.append(d["behavior"])
+        return default_implementer(req)
+
+    def ask(request: dict) -> str:
+        asked.append(request["input"]["command"])
+        return "allow_run"
+
+    fake = FakeProvider().on(Role.IMPLEMENTER, implementer)
+    fake.on(Role.DIRECTOR, plan_with(("only", [])))
+    orch = make_orch(project, fake)
+    orch.ask_permission = ask
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL
+    assert asked == ["mvn -q verify"]  # asked once; then allowed for the run; rm never asked
+    assert outcomes == ["allow", "allow", "deny"]
+    perms = [a for a in orch.store.approvals(run.id) if a.kind == "PERMISSION"]
+    assert len(perms) == 1 and perms[0].decision == "APPROVED"
+
+
+def test_permission_prompts_off_by_default(make_orch, fake):
+    orch = make_orch()
+    orch.approve_plan(orch.start_run("x").id)
+    assert all(c.permission_dir is None for c in fake.calls)

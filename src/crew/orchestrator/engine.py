@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
+import threading
 import uuid
 from collections.abc import Callable, Coroutine, Iterator
 from contextvars import ContextVar
@@ -77,6 +79,9 @@ from crew.workspace.worktrees import WorkspaceManager
 log = logging.getLogger(__name__)
 
 Notify = Callable[[str], None]
+# Shown a permission request (dict from the permission server); returns
+# "allow" (once), "allow_run" (for the rest of the run) or "deny".
+AskPermission = Callable[[dict[str, Any]], str]
 T = TypeVar("T")
 
 # Linked documentation (Confluence pages, …) added to the Director's context.
@@ -91,6 +96,30 @@ CURRENT_RUN: ContextVar[str | None] = ContextVar("crew_current_run", default=Non
 
 class RunCancelled(Exception):
     """Raised inside a stage when the developer requested cancellation."""
+
+
+PERMISSION_POLL_SECONDS = 0.3
+
+
+async def _stop(task: asyncio.Task[None] | None) -> None:
+    if task is not None:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+def _read_json_list(path: Path) -> list[Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return value if isinstance(value, list) else []
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
 
 
 def _pr_title(run: Run) -> str:
@@ -134,12 +163,21 @@ class Project:
 
 
 class Orchestrator:
-    def __init__(self, project: Project, provider: AgentProvider, notify: Notify | None = None):
+    def __init__(
+        self,
+        project: Project,
+        provider: AgentProvider,
+        notify: Notify | None = None,
+        ask_permission: AskPermission | None = None,
+    ):
         self.p = project
         self.store = project.store
         self.config = project.config
         self.provider = provider
-        self.runtime = AgentRuntime(project.store, provider, project.config)
+        self.ask_permission = ask_permission
+        self.runtime = AgentRuntime(
+            project.store, provider, project.config, permission_dir=self._permission_dir
+        )
         self.notify: Notify = notify or (lambda _msg: None)
         self._rate_limited = False
         self._handlers: dict[RunState, Callable[[Run], None]] = {
@@ -536,6 +574,7 @@ class Orchestrator:
         self._rate_limited = False
         limit = self.config.execution.max_implementers
         running: dict[str, asyncio.Task[None]] = {}
+        broker = self._start_permission_broker(run.id)
         try:
             while True:
                 if self.store.is_cancel_requested(run.id):
@@ -591,6 +630,7 @@ class Orchestrator:
                 t.cancel()
             if running:
                 await asyncio.gather(*running.values(), return_exceptions=True)
+            await _stop(broker)
 
     async def _run_task(self, run: Run, task: Task, execution_id: str) -> None:
         ws = self.p.workspace
@@ -1006,17 +1046,82 @@ class Orchestrator:
 
         async def watch() -> T:
             task = asyncio.ensure_future(coro)
-            while True:
-                done, _ = await asyncio.wait({task}, timeout=CANCEL_POLL_SECONDS)
-                if done:
-                    return task.result()
-                if self.store.is_cancel_requested(run_id):
-                    task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await task
-                    raise RunCancelled
+            broker = self._start_permission_broker(run_id)
+            try:
+                while True:
+                    done, _ = await asyncio.wait({task}, timeout=CANCEL_POLL_SECONDS)
+                    if done:
+                        return task.result()
+                    if self.store.is_cancel_requested(run_id):
+                        task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await task
+                        raise RunCancelled
+            finally:
+                await _stop(broker)
 
         return asyncio.run(watch())
+
+    # ---- permission prompts -------------------------------------------------
+
+    def _permission_dir(self, run_id: str) -> Path:
+        return self.p.paths.run_dir(run_id) / "permissions"
+
+    def _start_permission_broker(self, run_id: str) -> asyncio.Task[None] | None:
+        if self.config.approvals.permission_prompts != "ask":
+            return None
+        return asyncio.create_task(self._permission_broker(run_id))
+
+    async def _permission_broker(self, run_id: str) -> None:
+        """Answer agents' permission requests (written by the permission server)."""
+        directory = self._permission_dir(run_id)
+        while True:
+            for request_file in sorted(directory.glob("*.request.json")):
+                response_file = request_file.with_name(
+                    request_file.name.replace(".request.json", ".response.json")
+                )
+                if response_file.exists():
+                    continue
+                try:
+                    request = json.loads(request_file.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                decision = await self._ask_developer(request)
+                if decision == "allow_run":
+                    allowed_file = directory / "allowed.json"
+                    allowed = _read_json_list(allowed_file)
+                    allowed.append(request["key"])
+                    _atomic_write(allowed_file, json.dumps(allowed))
+                _atomic_write(response_file, json.dumps({"decision": decision}))
+                approved = decision in ("allow", "allow_run")
+                note = f"{request.get('role')} {request.get('key')}"
+                self.store.add_approval(
+                    run_id,
+                    ApprovalKind.PERMISSION,
+                    ApprovalDecision.APPROVED if approved else ApprovalDecision.REJECTED,
+                    f"{note} ({decision})",
+                )
+                self.store.add_event(run_id, "permission_" + decision, note)
+            await asyncio.sleep(PERMISSION_POLL_SECONDS)
+
+    async def _ask_developer(self, request: dict[str, Any]) -> str:
+        if self.ask_permission is None:
+            return "deny"
+        ask = self.ask_permission
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[str] = loop.create_future()
+
+        def worker() -> None:
+            try:
+                answer = ask(request)
+            except Exception:  # a broken prompt must not crash the run
+                answer = "deny"
+            loop.call_soon_threadsafe(lambda: future.done() or future.set_result(answer))
+
+        # A daemon thread, so an unanswered prompt never blocks CREW from exiting.
+        threading.Thread(target=worker, daemon=True).start()
+        answer = await future
+        return answer if answer in ("allow", "allow_run", "deny") else "deny"
 
     def _transition(self, run_id: str, to: RunState, message: str = "", **fields: Any) -> Run:
         run = self.store.transition(run_id, to, message=message, **fields)

@@ -29,10 +29,12 @@ import asyncio
 import json
 import os
 import shutil
+import sys
 import time
 from pathlib import Path
 
 from crew.config.schema import ClaudeCodeSettings, role_settings
+from crew.domain.enums import Role
 from crew.domain.errors import ProviderError
 from crew.providers.base import AgentRequest, AgentResult, ProcessStarted
 from crew.providers.claude_code.parser import is_usage_limit, parse_cli_output
@@ -45,6 +47,9 @@ from crew.system.processes import (
 )
 
 READ_TOOLS = ("Read", "Glob", "Grep")
+SHELL_TOOLS = ("PowerShell", "Bash") if os.name == "nt" else ("Bash",)
+# Roles that may ask for extra shell permissions when approvals.permission_prompts=ask.
+ASKING_ROLES = frozenset({Role.IMPLEMENTER, Role.REVIEWER})
 EDIT_TOOLS = ("Edit", "Write")
 MAX_CAPTURE_BYTES = 5_000_000
 
@@ -69,13 +74,18 @@ def build_argv(
             if any(rule.startswith(f"{tool}(") for rule in caps.bash_rules):
                 tools.append(tool)
         allowed += caps.bash_rules
+    if request.permission_dir is not None and request.role in ASKING_ROLES:
+        # Make the shell *available* but not pre-approved: every use outside the
+        # rules goes through CREW's approval tool and the developer.
+        for tool in SHELL_TOOLS:
+            if tool not in tools:
+                tools.append(tool)
     argv = [
         *([command] if isinstance(command, str) else command),
         "-p",
         "--restricted",  # confine file tools, ignore user/project settings, refuse bypass
         "--strict-mcp-config",  # no MCP servers from the developer's configuration
-        "--permission-prompts",
-        "none",
+        *_permission_flags(request),
         "--permission-mode",
         "acceptEdits" if caps.can_edit_files else "dontAsk",
         "--no-session-persistence",
@@ -120,6 +130,36 @@ def resolve_cli_command(executable: str) -> list[str]:
         hint="Install the native Claude Code build (claude.exe), or make sure `node` is on "
         "PATH next to the npm package, then run `crew doctor`.",
     )
+
+
+PERMISSION_TOOL = "mcp__crew__approve"
+
+
+def _permission_flags(request: AgentRequest) -> list[str]:
+    """Who answers permission prompts: nobody (deny), or CREW's MCP approval tool."""
+    if request.permission_dir is None:
+        return ["--permission-prompts", "none"]
+    server = {
+        "type": "stdio",
+        "command": sys.executable,
+        "args": ["-m", "crew.agents.permission_server"],
+        "env": {
+            "CREW_PERMISSION_DIR": str(request.permission_dir),
+            "CREW_PERMISSION_TIMEOUT": str(request.permission_timeout_seconds),
+            "CREW_RUN_ID": request.run_id,
+            "CREW_EXECUTION_ID": request.execution_id,
+            "CREW_ROLE": request.role.value,
+        },
+    }
+    return [
+        "--permission-prompts",
+        "host",
+        "--permission-prompt-tool",
+        PERMISSION_TOOL,
+        # The only MCP server agents get (--strict-mcp-config ignores all others).
+        "--mcp-config",
+        json.dumps({"mcpServers": {"crew": server}}, separators=(",", ":")),
+    ]
 
 
 def _child_env() -> dict[str, str]:

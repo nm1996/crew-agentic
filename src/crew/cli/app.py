@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
@@ -91,6 +92,29 @@ def _notify(message: str) -> None:
         "yellow" if message.startswith("[warning]") else "cyan" if message.startswith("→") else ""
     )
     console.print(message, style=style, markup=False, highlight=False)
+
+
+_PROMPT_LOCK = threading.Lock()
+
+
+def _ask_permission(request: dict[str, Any]) -> str:
+    """Ask the developer about an agent's permission request (terminal only)."""
+    if not sys.stdin.isatty():
+        return "deny"  # background/CI: never block, never allow silently
+    tool = request.get("tool_name", "?")
+    detail = request.get("input", {}).get("command") or json.dumps(request.get("input", {}))[:300]
+    with _PROMPT_LOCK:
+        console.print()
+        console.print(
+            f"[bold yellow]Permission request[/] from the {request.get('role', 'agent')} "
+            f"({request.get('category') or 'unclassified'}):",
+        )
+        console.print(f"  {tool}: [bold]{detail}[/]", markup=True, highlight=False)
+        answer = console.input("  Allow? [y]es once / [a]lways in this run / [N]o: ")
+    answer = answer.strip().lower()
+    return {"y": "allow", "yes": "allow", "a": "allow_run", "always": "allow_run"}.get(
+        answer, "deny"
+    )
 
 
 def _state(run: Run) -> str:
@@ -238,7 +262,7 @@ def run(
         console.print(f"Request from {sources.issue_key}:", style="dim")
     for page in sources.docs:
         console.print(f"Context: {page.title} ({page.url or page.ref})", style="dim")
-    result = make_orchestrator(project, _notify).start_run(
+    result = make_orchestrator(project, _notify, ask_permission=_ask_permission).start_run(
         sources.request, issue_key=sources.issue_key, linked_docs=sources.docs
     )
     _after_drive(result)
@@ -293,7 +317,7 @@ def publish(
         console.print(f"  • {action}")
     if not yes and not typer.confirm("Proceed?", default=False):
         raise typer.Exit(1)
-    result = make_orchestrator(project, _notify).publish(
+    result = make_orchestrator(project, _notify, ask_permission=_ask_permission).publish(
         run_id,
         code_host=host,
         open_pr=pr,
@@ -326,7 +350,9 @@ def approve_plan(
 ) -> None:
     """Approve the plan and execute implementation, review and evaluation."""
     project = open_project()
-    result = make_orchestrator(project, _notify).approve_plan(run_id, note, proceed=not no_continue)
+    result = make_orchestrator(project, _notify, ask_permission=_ask_permission).approve_plan(
+        run_id, note, proceed=not no_continue
+    )
     _after_drive(result)
 
 
@@ -334,42 +360,62 @@ def approve_plan(
 @handle_errors
 def reject_plan(run_id: RunIdArg, note: NoteOpt = None) -> None:
     """Reject the proposed plan (run ends as PLAN_REJECTED)."""
-    _after_drive(make_orchestrator(open_project(), _notify).reject_plan(run_id, note))
+    _after_drive(
+        make_orchestrator(open_project(), _notify, ask_permission=_ask_permission).reject_plan(
+            run_id, note
+        )
+    )
 
 
 @app.command()
 @handle_errors
 def accept(run_id: RunIdArg, note: NoteOpt = None) -> None:
     """Final approval: accept the result (CREW still never merges for you)."""
-    _after_drive(make_orchestrator(open_project(), _notify).accept(run_id, note))
+    _after_drive(
+        make_orchestrator(open_project(), _notify, ask_permission=_ask_permission).accept(
+            run_id, note
+        )
+    )
 
 
 @app.command()
 @handle_errors
 def reject(run_id: RunIdArg, note: NoteOpt = None) -> None:
     """Final decision: reject the result."""
-    _after_drive(make_orchestrator(open_project(), _notify).reject(run_id, note))
+    _after_drive(
+        make_orchestrator(open_project(), _notify, ask_permission=_ask_permission).reject(
+            run_id, note
+        )
+    )
 
 
 @app.command()
 @handle_errors
 def resume(run_id: RunIdArg) -> None:
     """Resume an interrupted run after re-validating repository and worktree state."""
-    _after_drive(make_orchestrator(open_project(), _notify).resume(run_id))
+    _after_drive(
+        make_orchestrator(open_project(), _notify, ask_permission=_ask_permission).resume(run_id)
+    )
 
 
 @app.command()
 @handle_errors
 def retry(run_id: RunIdArg, note: NoteOpt = None) -> None:
     """Retry a FAILED run from the stage it failed in (failed tasks get fresh attempts)."""
-    _after_drive(make_orchestrator(open_project(), _notify).retry(run_id, note))
+    _after_drive(
+        make_orchestrator(open_project(), _notify, ask_permission=_ask_permission).retry(
+            run_id, note
+        )
+    )
 
 
 @app.command()
 @handle_errors
 def stop(run_id: RunIdArg) -> None:
     """Cancel a run (cooperatively if another process is driving it)."""
-    run, immediate = make_orchestrator(open_project(), _notify).stop(run_id)
+    run, immediate = make_orchestrator(
+        open_project(), _notify, ask_permission=_ask_permission
+    ).stop(run_id)
     if immediate:
         console.print(f"Run {run.id} is {_state(run)}. Worktrees were preserved.")
     else:
@@ -389,7 +435,7 @@ def cleanup(
 ) -> None:
     """Remove finished runs' clean worktrees (and with --branches, their CREW branches)."""
     project = open_project()
-    orch = make_orchestrator(project, _notify)
+    orch = make_orchestrator(project, _notify, ask_permission=_ask_permission)
     if all_runs == bool(run_id):
         raise CrewError("Pass either a run id or --all.")
     runs = (

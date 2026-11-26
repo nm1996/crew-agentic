@@ -77,3 +77,35 @@ def test_implementer_can_use_a_scoped_shell_rule(project, repo):
         [python, "--version"], capture_output=True, text=True, check=True
     ).stdout.strip()
     assert actual in content  # the agent ran the command rather than guessing
+
+
+def test_permission_prompt_tool_with_the_real_cli(project, repo):
+    """A command outside the rules reaches CREW's MCP approval tool and the developer."""
+    python = "python" if os.name == "nt" else "python3"
+    configure(
+        open_project(repo),
+        [
+            "provider.default=claude_code",
+            "approvals.permission_prompts=ask",
+            "approvals.permission_timeout_seconds=120",
+        ],
+    )
+    real = open_project(repo)
+    asked: list[dict] = []
+
+    def allow(request: dict) -> str:
+        asked.append(request)
+        return "allow"
+
+    orch = make_orchestrator(real, notify=print, ask_permission=allow)
+    run = orch.start_run(
+        f'Run the shell command `{python} -c "print(6*7)"` and write its output into a new '
+        "file answer.txt. Do not change anything else."
+    )
+    assert run.state == RunState.AWAITING_PLAN_APPROVAL, run.failure_reason
+    run = orch.approve_plan(run.id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL, run.failure_reason
+    assert asked, "the agent never asked for permission"
+    assert any(r["tool_name"] in ("Bash", "PowerShell") for r in asked)
+    assert "42" in real.git.run("show", f"{run.integration_branch}:answer.txt")
+    assert any(a.kind == "PERMISSION" for a in real.store.approvals(run.id))

@@ -35,6 +35,9 @@ class AgentRequest:
     execution_id: str
     task_key: str | None = None
     max_budget_usd: float | None = None  # per-execution spending cap, if any
+    # Set when the developer should be asked for permissions the rules do not grant.
+    permission_dir: Path | None = None
+    permission_timeout_seconds: int = 300
 
 
 @dataclass

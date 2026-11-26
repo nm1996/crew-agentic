@@ -281,3 +281,24 @@ def test_usage_limits_are_classified(text):
         parse_cli_output(json.dumps({"is_error": True, "subtype": "success", "result": text}))
     assert info.value.kind == "rate_limited"
     assert "crew retry" in info.value.hint
+
+
+def test_permission_prompt_flags(tmp_path):
+    import dataclasses
+
+    request = dataclasses.replace(
+        make_request(Role.IMPLEMENTER, tmp_path), permission_dir=tmp_path / "p"
+    )
+    argv = build_argv(CONFIG.provider.claude_code, request, "claude")
+    assert _value(argv, "--permission-prompts") == "host"
+    assert _value(argv, "--permission-prompt-tool") == "mcp__crew__approve"
+    server = json.loads(_value(argv, "--mcp-config"))["mcpServers"]["crew"]
+    assert server["args"] == ["-m", "crew.agents.permission_server"]
+    assert server["env"]["CREW_PERMISSION_DIR"] == str(tmp_path / "p")
+    assert "--strict-mcp-config" in argv  # still no other MCP servers
+    assert argv.index("--mcp-config") < argv.index("--json-schema")
+    tools = _value(argv, "--tools").split(",")
+    allowed = _value(argv, "--allowedTools").split(",")
+    assert "Bash" in tools and "Bash" not in allowed  # available, but every use is asked
+    director = dataclasses.replace(make_request(Role.DIRECTOR, tmp_path), permission_dir=tmp_path)
+    assert "Bash" not in _value(build_argv(CONFIG.provider.claude_code, director, "c"), "--tools")

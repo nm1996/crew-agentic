@@ -19,7 +19,7 @@ from crew.config.loader import (
 )
 from crew.config.schema import CrewConfig, ProjectSettings, ProviderSettings
 from crew.domain.errors import ConfigError, PreconditionError
-from crew.orchestrator.engine import CURRENT_RUN, Notify, Orchestrator, Project
+from crew.orchestrator.engine import CURRENT_RUN, AskPermission, Notify, Orchestrator, Project
 from crew.persistence.database import migrate
 from crew.persistence.store import Store
 from crew.providers.base import AgentProvider
@@ -96,9 +96,14 @@ def make_provider(config: CrewConfig) -> AgentProvider:
 
 
 def make_orchestrator(
-    project: Project, notify: Notify | None = None, provider: AgentProvider | None = None
+    project: Project,
+    notify: Notify | None = None,
+    provider: AgentProvider | None = None,
+    ask_permission: AskPermission | None = None,
 ) -> Orchestrator:
-    return Orchestrator(project, provider or make_provider(project.config), notify)
+    return Orchestrator(
+        project, provider or make_provider(project.config), notify, ask_permission=ask_permission
+    )
 
 
 def _configure_file_logging(paths: ProjectPaths) -> None:

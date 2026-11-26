@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Callable
 from functools import cache
 from importlib.resources import files
 from pathlib import Path
@@ -68,10 +69,17 @@ def _usage_fields(result: AgentResult) -> dict[str, Any]:
 
 
 class AgentRuntime:
-    def __init__(self, store: Store, provider: AgentProvider, config: CrewConfig) -> None:
+    def __init__(
+        self,
+        store: Store,
+        provider: AgentProvider,
+        config: CrewConfig,
+        permission_dir: Callable[[str], Path] | None = None,
+    ) -> None:
         self.store = store
         self.provider = provider
         self.config = config
+        self._permission_dir = permission_dir
 
     def execution_budget(self, run_id: str, role: Role) -> float | None:
         """Spending cap for the next execution, or ``None`` when unlimited.
@@ -119,6 +127,12 @@ class AgentRuntime:
             execution_id=execution_id,
             task_key=task.key if task else None,
             max_budget_usd=budget,
+            permission_dir=(
+                self._permission_dir(run_id)
+                if self._permission_dir and self.config.approvals.permission_prompts == "ask"
+                else None
+            ),
+            permission_timeout_seconds=self.config.approvals.permission_timeout_seconds,
         )
         self.store.start_execution(
             run_id=run_id,
