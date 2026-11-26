@@ -2,8 +2,9 @@
 
 * POSIX: children start in their own session/process group, so a whole agent
   tree (``claude`` plus its tool subprocesses) can be signalled at once.
-* Windows: children start in a new process group without a console window;
-  trees are terminated with psutil (``terminate`` = TerminateProcess).
+* Windows: children start in a new process group without a console window and
+  are assigned to a kill-on-close Job Object (:mod:`crew.system.winjob`), so the
+  whole tree dies with the job, even grandchildren whose parent already exited.
 
 Termination always walks the process tree with psutil and, on POSIX, also
 signals the process group, so grandchildren that outlive their parent are
@@ -20,6 +21,8 @@ import subprocess
 from typing import Any
 
 import psutil
+
+from crew.system import winjob
 
 IS_WINDOWS = os.name == "nt"
 DEFAULT_GRACE_SECONDS = 5.0
@@ -52,12 +55,18 @@ def _signal_group(pid: int, sig: int) -> None:
         os.killpg(pid, sig)
 
 
+def track_child(pid: int) -> None:
+    """Register a freshly spawned child for whole-tree termination (Windows Job Object)."""
+    winjob.attach(pid)
+
+
 def kill_tree(pid: int, grace: float = DEFAULT_GRACE_SECONDS) -> bool:
     """Terminate ``pid`` and all of its descendants; escalate to kill after ``grace``.
 
     Blocking. Returns ``True`` when nothing from the tree is left alive.
     """
     procs = _collect_tree(pid)
+    winjob.terminate(pid)  # Windows: ends the whole job at once, if the child had one
     _signal_group(pid, signal.SIGTERM)
     for proc in procs:
         with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):

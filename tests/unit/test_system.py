@@ -1,12 +1,14 @@
 """Portable process-tree termination and file locking."""
 
 import multiprocessing
+import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 import psutil
+import pytest
 
 from crew.system.locking import FileLock
 from crew.system.processes import (
@@ -106,3 +108,51 @@ def test_file_lock_released_when_holder_dies(tmp_path: Path):
     lock = FileLock(path)
     assert lock.try_acquire()
     lock.release()
+
+
+ORPHANING_PARENT = (
+    "import subprocess, sys, time\n"
+    "time.sleep(0.5)\n"  # give CREW time to put us in a job (Windows)
+    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],\n"
+    "                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+    "print(child.pid, flush=True)\n"
+)  # exits immediately, leaving the grandchild behind
+
+
+async def test_grandchild_of_an_exited_parent_is_still_stopped():
+    import asyncio
+
+    from crew.system.processes import track_child
+
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-c", ORPHANING_PARENT, stdout=asyncio.subprocess.PIPE, **spawn_kwargs()
+    )
+    track_child(proc.pid)
+    grandchild = int((await proc.stdout.readline()).decode())
+    await proc.wait()
+    assert psutil.pid_exists(grandchild)
+    await terminate_tree(proc, grace=2)  # process group (POSIX) / job object (Windows)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            if psutil.Process(grandchild).status() == psutil.STATUS_ZOMBIE:
+                break
+        except psutil.NoSuchProcess:
+            break
+        time.sleep(0.1)
+    else:
+        pytest.fail("grandchild survived")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job Objects")
+def test_job_object_is_created_on_windows():
+    from crew.system import winjob
+
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], **spawn_kwargs())
+    try:
+        assert winjob.attach(proc.pid)
+        assert winjob.has_job(proc.pid)
+        assert winjob.terminate(proc.pid)
+        proc.wait(timeout=10)
+    finally:
+        proc.kill()

@@ -37,7 +37,12 @@ from crew.domain.errors import ProviderError
 from crew.providers.base import AgentRequest, AgentResult, ProcessStarted
 from crew.providers.claude_code.parser import parse_cli_output
 from crew.security.redaction import redact
-from crew.system.processes import process_started_at, spawn_kwargs, terminate_tree
+from crew.system.processes import (
+    process_started_at,
+    spawn_kwargs,
+    terminate_tree,
+    track_child,
+)
 
 READ_TOOLS = ("Read", "Glob", "Grep")
 EDIT_TOOLS = ("Edit", "Write")
@@ -167,6 +172,7 @@ class ClaudeCodeProvider:
             limit=MAX_CAPTURE_BYTES,
             **spawn_kwargs(),  # own process group so the whole agent tree can be stopped
         )
+        track_child(proc.pid)
         if on_process_start:
             on_process_start(proc.pid, process_started_at(proc.pid))
         try:

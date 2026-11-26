@@ -19,7 +19,7 @@ from pathlib import Path
 from crew.domain.enums import CommandCategory
 from crew.domain.errors import PolicyViolationError
 from crew.security.redaction import redact, redact_args
-from crew.system.processes import spawn_kwargs, terminate_tree
+from crew.system.processes import spawn_kwargs, terminate_tree, track_child
 
 _DESTRUCTIVE_TOKENS = {
     "rm",
@@ -291,6 +291,7 @@ async def run_command(
             timed_out=False,
             truncated=False,
         )
+    track_child(proc.pid)
     timed_out = False
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
