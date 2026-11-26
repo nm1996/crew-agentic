@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "Local-first AI development orchestration CLI: plan, implement, review and evaluate changes with approval gates."
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "CREW contributors" }]
 keywords = ["ai", "agents", "orchestration", "cli", "claude", "git"]
 classifiers = [
@@ -35,7 +37,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

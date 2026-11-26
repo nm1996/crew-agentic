@@ -77,3 +77,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 `0.1.0` — MVP. Linux-first, single developer, Claude Code CLI as the only real provider.
 See [docs/ROADMAP.md](docs/ROADMAP.md) and the known limitations in
 [docs/DECISIONS.md](docs/DECISIONS.md#known-limitations).
+
+## License
+
+[MIT](LICENSE)
