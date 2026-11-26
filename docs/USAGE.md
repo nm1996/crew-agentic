@@ -76,6 +76,7 @@ git merge --no-ff crew/<id>/integration   # CREW never merges for you
 | 9 | Provider error. |
 | 10 | Invalid plan. |
 | 11 | Run budget exhausted (`execution.max_run_budget_usd`). |
+| 12 | Unresolvable merge conflict. |
 | 130 | Interrupted (Ctrl-C); state preserved for `crew resume`. |
 
 ## Run states
@@ -123,7 +124,7 @@ recovery cannot be established, CREW stops and tells you why.
 ## Retrying a failed run
 
 A run ends `FAILED` when, for example, an agent keeps timing out, returns invalid output,
-the budget runs out, or a merge conflicts. Its worktrees and branches are preserved.
+the budget or your Claude usage limit runs out, or a merge conflict cannot be resolved. Its worktrees and branches are preserved.
 After fixing the cause (raise the timeout or budget, fix credentials, …):
 
 ```bash

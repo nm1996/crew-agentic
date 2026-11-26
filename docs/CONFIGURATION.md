@@ -13,7 +13,9 @@ provider:
   claude_code:
     executable: claude          # name on PATH or absolute path
     timeout_seconds: 1800       # per agent execution (30 … 14400)
-    model: null                 # e.g. "opus", "sonnet"; null = CLI default
+    model: null                 # default model for every role; null = CLI default
+    profile: default            # default | balanced | economy (per-role model/effort)
+    roles: {}                   # per-role overrides, e.g. {evaluator: {model: haiku, effort: low}}
     max_budget_usd: null        # per agent execution cap, passed as --max-budget-usd
     restricted: true            # always on: --restricted --strict-mcp-config (cannot be disabled)
     implementer_bash_rules: []  # e.g. ["Bash(uv run pytest:*)"]; on Windows also "PowerShell(...)"
@@ -27,6 +29,8 @@ execution:
   command_output_limit_bytes: 200000
   preserve_worktrees_on_failure: true
   verification_commands: []     # strings or argv lists, e.g. ["uv run pytest -q", ["npm", "test"]]
+  review_context: full          # full | summary — how much diff Reviewer/Evaluator get inline
+  conflict_resolution: agent    # agent | fail — resolve merge conflicts with an Implementer
   sandbox: none                 # none | bwrap (Linux) | docker — isolation for verification
   sandbox_image: null           # docker only, e.g. python:3.12-slim
   sandbox_network: false        # allow network inside the sandbox
@@ -123,6 +127,43 @@ crew configure 'provider.claude_code.implementer_bash_rules=["Bash(uv run pytest
 
 Anything not allowed is denied automatically (`--permission-prompts none`); no one can
 approve an escalation in the middle of a run.
+
+## Cost: profiles, per-role models and review context
+
+Most of a run's cost is model choice and how much text each agent reads. Three settings
+control it (measured effect: [examples/spring-boot-crud.md](examples/spring-boot-crud.md)):
+
+**`provider.claude_code.profile`** sets per-role defaults:
+
+| Role | `default` | `balanced` | `economy` |
+|---|---|---|---|
+| Director | CLI default | CLI default, effort medium | sonnet, effort medium |
+| Implementer | CLI default | CLI default, effort medium | sonnet, effort medium |
+| Reviewer | CLI default | sonnet, effort medium | sonnet, effort low |
+| Evaluator | CLI default | sonnet, effort low | haiku, effort low |
+
+**`provider.claude_code.roles`** overrides single roles and wins over the profile and the
+global `model`:
+
+```yaml
+provider:
+  claude_code:
+    profile: balanced
+    roles:
+      implementer: {model: opus, effort: high}   # keep the strongest model where it matters
+```
+
+Model values are Claude Code aliases (`opus`, `sonnet`, `haiku`, …) or full model ids;
+effort is one of `low`, `medium`, `high`, `xhigh`, `max` (`--effort`).
+
+**`execution.review_context: summary`** gives the Reviewer and Evaluator the diff stat,
+the list of changed files and the first 12 kB of the patch instead of the whole diff; they
+open the files they need with their Read tool. On large changes this removes tens of
+thousands of prompt tokens per agent.
+
+Measured on the reference run ([examples/spring-boot-crud.md](examples/spring-boot-crud.md#cost-profiles-compared)):
+`default` $3.34, `economy` $1.28 for an equally working service (fewer tests, shallower
+review).
 
 ## Run budget
 

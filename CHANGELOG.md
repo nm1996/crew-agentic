@@ -12,8 +12,17 @@ All notable changes to this project are documented here. The format follows
 - M9 roadmap: permission prompts and integration adapters (Jira, code host, review,
   Confluence).
 
+- Cost profiles (`provider.claude_code.profile: default|balanced|economy`), per-role model
+  and `--effort` overrides (`provider.claude_code.roles`), and
+  `execution.review_context: summary`. Measured: economy cut the reference run from
+  $3.34 to $1.28.
+- Merge conflicts are resolved by an Implementer (`execution.conflict_resolution`);
+  changes outside a task's planned files are reported.
+
 ### Fixed
 - Run ids were truncated in `crew history` in narrow terminals.
+- Claude usage/rate limits were retried immediately; they now stop the run cleanly and
+  `crew retry` continues after the reset.
 
 ## [0.3.0] - 2026-11-26
 

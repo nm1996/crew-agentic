@@ -10,7 +10,7 @@ the workflow produce a working service, what does it cost, and where does the mo
 | Claude Code CLI | 2.1.319, CLI default model (`claude-opus-5-5`; Claude Code also used `claude-haiku-5-5` internally) |
 | Machine | Linux, OpenJDK 25, Maven 3.10, empty Maven cache |
 | Result | **COMPLETED**, accepted after independent verification |
-| Total cost | **$3.34** (budget $25) |
+| Total cost | **$3.34** API-equivalent (budget $25) — see [About the cost figures](#about-the-cost-figures) |
 | Time | 44 s planning + 13 min implementation, review and evaluation |
 
 ## Setup
@@ -129,8 +129,69 @@ tests, review and evaluation.
 | Corrections | `execution.max_correction_cycles` | none were needed |
 | Agent tools | `*_bash_rules` | fewer rules, fewer turns, but more risk of failed tasks |
 
-Missing and now on the roadmap: **per-role models** (e.g. a cheaper Evaluator) and a
-**compact review payload** (diff summary instead of the full diff).
+Added in 0.4.0 as a result of this run: **cost profiles and per-role models**, a
+**compact review context**, agent-based **merge-conflict resolution** and usage-limit
+handling — compared in the next section.
+
+## Cost profiles compared
+
+The same request and setup, re-run with the cost controls added in 0.4.0
+(`provider.claude_code.profile` plus `execution.review_context: summary`, see
+[CONFIGURATION.md](../CONFIGURATION.md#cost-profiles-per-role-models-and-review-context)).
+Every result was verified independently the same way: fresh clone, `mvn -q -B verify`,
+`mvn spring-boot:run`, and the 25-step black-box API script.
+
+| | `default` (all Opus, full diff) | `economy` (Sonnet/Haiku, summary) | `balanced` |
+|---|---|---|---|
+| Cost | $3.34 | **$1.28 (−62 %)** | pending² |
+| Wall-clock time | 14 min | 13.5 min | |
+| Tasks in plan | 3 (chain) | 6 (scaffold → users ∥ products → carts ∥ orders → docs) | 5–6 |
+| Generated | 42 files, 2,236 lines | 34 files, 1,681 lines | |
+| Integration tests | **69** | 36 | |
+| Black-box API checks | 25/25 | **25/25** | |
+| Review findings | 5 (1 medium, 4 low) | 1 (low) | |
+| Evaluator | ACCEPT | NEEDS_CHANGES³ | |
+
+Economy per role:
+
+| Role | Model | Cost | Agent time | Turns |
+|---|---|---|---|---|
+| Director | Sonnet, effort medium | $0.08 | 32 s | 2 |
+| Implementer ×6 | Sonnet, effort medium | $1.01 | 531 s | 95 |
+| Reviewer | Sonnet, effort low | $0.11 | 11 s | 5 |
+| Evaluator | Haiku, effort low | $0.08 | 370 s | 26 |
+
+What this shows:
+
+- **The economy profile produced an equally working service for 38 % of the cost.** The
+  price is depth: half as many tests and a much shallower review (one finding in 11 s,
+  against five from the Opus reviewer).
+- **Summary review context works**: Reviewer and Evaluator prompts shrank, and the agents
+  opened files themselves. The Haiku Evaluator compensated with many turns (26) but stayed
+  at $0.08.
+- **A cheaper Director planned for more parallelism** (6 tasks, two parallel pairs). That
+  is faster in principle but raises the merge-conflict risk — see the next point.
+- ² **The first `balanced` run found a CREW bug, the second hit the subscription limit.**
+  Two parallel Implementers both added the same Maven plugin to `pom.xml` (with different
+  comments); Git could not merge them and CREW failed the run. CREW now resolves such
+  conflicts with an agent (D22). The re-run then stopped at the Claude subscription's
+  5-hour usage limit, which CREW now recognises instead of retrying into it; the run is
+  resumable with `crew retry` and this row will be filled in afterwards.
+- ³ The Haiku Evaluator asked for changes because startup on port 8080 was not evidenced
+  and two test classes clean up less carefully than the others. Both are fair; neither is
+  a functional defect (the service passed all API checks).
+
+**Recommendation:** use `economy` for prototypes and well-specified CRUD-style work, and
+keep the strongest model for Implementers (`roles: {implementer: {model: opus}}`) when
+test depth matters; that keeps most of the savings on planning, review and evaluation.
+
+## About the cost figures
+
+All amounts are the `total_cost_usd` reported by the Claude Code CLI, i.e. **API-list
+equivalent**. With an API key that is what you pay. With a Claude subscription (Pro/Max)
+there is no per-run charge; runs consume the plan's usage limits instead — the three runs
+above plus the failed one used up a 5-hour window. CREW stops cleanly when a limit is hit
+and `crew retry` continues after it resets.
 
 ## Review findings (all non-blocking)
 

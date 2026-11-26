@@ -248,6 +248,40 @@ Observed on Linux (CLI 2.1.319): a scoped rule containing spaces
 outside it was blocked. Claude Code itself auto-allows some read-only commands such as
 `git status` without a rule.
 
+## D21. Cost controls
+
+The reference run showed every role on the most expensive model, Reviewer and Evaluator
+spending a third of the cost on embedding the full diff, and Implementers using ~33 turns
+per task. Controls added in 0.4.0:
+
+- `provider.claude_code.profile` (`default` | `balanced` | `economy`) maps each role to a
+  model alias and an `--effort` level; `provider.claude_code.roles` overrides per role.
+  Precedence: explicit role > profile > global `model` > CLI default. `default` keeps the
+  previous behaviour (no `--model`, no `--effort`).
+- `execution.review_context: summary` replaces the embedded diff with stat, file list and
+  the first 12 kB of the patch; read-only agents already run in a snapshot of the
+  integration result and can open files themselves.
+- The Implementer prompt asks to batch edits before building.
+- Profiles change *which* model does the work, not the workflow or the safety gates.
+  Quality differences are measured in the reference example, not assumed.
+
+## D22. Merge conflicts and usage limits
+
+- **Conflicts** while merging dependency branches into a task worktree, or task branches
+  into the integration branch, are left in progress; with
+  `execution.conflict_resolution: agent` (default) an Implementer edits the conflicted
+  files with both sides' task reports as context. CREW — not the agent — verifies that no
+  conflict markers remain and creates the merge commit; otherwise it aborts the merge and
+  fails with `MergeConflictError` (not retried: the conflict is deterministic). `fail`
+  restores the earlier stop-on-conflict behaviour.
+- Changed files outside a task's `expected_files` are recorded (`scope_expanded`) and
+  listed in `implementation.md`; they are the usual cause of conflicts between parallel
+  tasks.
+- **Usage and rate limits** (subscription windows, HTTP 429, overload) are classified as
+  `rate_limited`: no retry, no new dispatches, completed tasks kept, and the run fails with
+  a pointer to `crew retry` after the reset.
+- Reported costs are API-list equivalents; on a subscription they are informational.
+
 ## Releases
 
 Version tags `vX.Y.Z` trigger `.github/workflows/release.yml`: the tag must equal the
