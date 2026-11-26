@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-26
+
 ### Added
 - `crew run --file request.md`: read the request from a file.
 - Build and runtime files (`pom.xml`, Gradle, `requirements.txt`, `Dockerfile`, …) in
