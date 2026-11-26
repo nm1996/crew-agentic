@@ -23,7 +23,7 @@ from crew.domain.errors import ProviderError
 from crew.persistence.models import JsonMixin, Task
 from crew.persistence.store import Store
 from crew.providers.base import AgentProvider, AgentRequest, Capabilities
-from crew.security.redaction import redact
+from crew.security.redaction import redact, redact_data
 
 M = TypeVar("M", bound=BaseModel)
 
@@ -115,8 +115,8 @@ class AgentRuntime:
             self.store.finish_execution(
                 execution_id,
                 status=ExecutionStatus.FAILED,
-                error=redact(f"{message}\n{exc}")[:20_000],
-                raw_output=redact(JsonMixin.dumps(result.output))[:100_000],
+                error=f"{message}\n{exc}"[:20_000],
+                raw_output=JsonMixin.dumps(redact_data(result.output))[:100_000],
                 session_id=result.session_id,
                 cost_usd=result.cost_usd,
             )
@@ -125,7 +125,7 @@ class AgentRuntime:
         self.store.finish_execution(
             execution_id,
             status=ExecutionStatus.SUCCEEDED,
-            output_json=redact(model.model_dump_json()),
+            output_json=model.model_dump_json(),  # redacted structurally by the store
             raw_output=result.raw_text[:100_000],
             session_id=result.session_id,
             cost_usd=result.cost_usd,

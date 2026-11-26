@@ -6,8 +6,10 @@ and ``KEY=value`` assignments whose key looks secret-bearing.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+from typing import Any
 
 REDACTED = "[REDACTED]"
 
@@ -40,6 +42,32 @@ def redact(text: str | None) -> str:
     for pattern in _PATTERNS:
         text = pattern.sub(REDACTED, text)
     return _ASSIGNMENT.sub(lambda m: f"{m.group(1)}{m.group(2)}{REDACTED}", text)
+
+
+def redact_data(value: Any) -> Any:
+    """Redact every string leaf of a JSON-compatible structure.
+
+    Use this instead of :func:`redact` on serialised JSON: regexes applied to JSON
+    text can consume escape characters and produce invalid JSON.
+    """
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, dict):
+        return {k: redact_data(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [redact_data(v) for v in value]
+    return value
+
+
+def redact_json_text(text: str | None) -> str | None:
+    """Redact a JSON document structurally; fall back to text redaction if it is not JSON."""
+    if text is None:
+        return None
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return redact(text)
+    return json.dumps(redact_data(data), ensure_ascii=False, default=str)
 
 
 def redact_args(args: list[str]) -> list[str]:

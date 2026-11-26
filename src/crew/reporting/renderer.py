@@ -13,6 +13,7 @@ from typing import Any
 from crew.domain.enums import ExecutionStatus, Role, RunState
 from crew.persistence.models import CommandExecution, Run, Task
 from crew.persistence.store import Store
+from crew.security.redaction import redact
 
 
 def _bullets(items: list[str] | None, empty: str = "_None._") -> list[str]:
@@ -262,6 +263,6 @@ def render_final_report(store: Store, run: Run) -> str:
 def write_artifact(store: Store, run_dir: Path, run_id: str, name: str, content: str) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     path = run_dir / name
-    path.write_text(content, encoding="utf-8")
+    path.write_text(redact(content), encoding="utf-8")
     store.upsert_artifact(run_id, name, path)
     return path

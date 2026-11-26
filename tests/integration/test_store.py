@@ -54,3 +54,13 @@ def test_timestamps_and_foreign_keys(project: Project):
         fk = s.connection().exec_driver_sql("PRAGMA foreign_keys").scalar()
     assert fk == 1
     assert run.created_at.tzinfo is not None
+
+
+def test_json_columns_stay_valid_after_redaction(project: Project):
+    store = project.store
+    run = make_run(project)
+    plan = '{"approach": "export PASSWORD=hunter2\\" then deploy", "tasks": []}'
+    store.update_run(run.id, plan_json=plan, failure_reason="token ghp_" + "a" * 30)
+    stored = store.get_run(run.id)
+    assert "hunter2" not in stored.plan["approach"]  # parses, and is redacted
+    assert "ghp_" not in stored.failure_reason

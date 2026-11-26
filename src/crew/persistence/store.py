@@ -31,7 +31,26 @@ from crew.persistence.models import (
     WorkflowEvent,
     utcnow,
 )
-from crew.security.redaction import redact
+from crew.security.redaction import redact, redact_json_text
+
+# Free-text columns that may contain agent or tool output.
+_TEXT_FIELDS = frozenset({"failure_reason", "error", "raw_output", "message", "note"})
+
+
+def _sanitize(fields: dict[str, Any]) -> dict[str, Any]:
+    """Redact secrets centrally before anything is written to SQLite.
+
+    ``*_json`` columns are redacted structurally so they stay valid JSON.
+    """
+    clean: dict[str, Any] = {}
+    for key, value in fields.items():
+        if isinstance(value, str) and key.endswith("_json"):
+            clean[key] = redact_json_text(value)
+        elif isinstance(value, str) and key in _TEXT_FIELDS:
+            clean[key] = redact(value)
+        else:
+            clean[key] = value
+    return clean
 
 
 def new_run_id() -> str:
@@ -89,7 +108,7 @@ class Store:
             run = s.get(Run, run_id)
             if run is None:
                 raise NotFoundError(f"Run {run_id} not found")
-            for key, value in fields.items():
+            for key, value in _sanitize(fields).items():
                 setattr(run, key, value)
             return run
 
@@ -116,7 +135,7 @@ class Store:
             from_state = RunState(run.state)
             assert_transition(from_state, to_state)
             run.state = to_state
-            for key, value in run_fields.items():
+            for key, value in _sanitize(run_fields).items():
                 setattr(run, key, value)
             for task in new_tasks or []:
                 task.run_id = run_id
@@ -199,7 +218,7 @@ class Store:
             task = s.get(Task, pk)
             if task is None:
                 raise NotFoundError(f"Task #{pk} not found")
-            for key, value in fields.items():
+            for key, value in _sanitize(fields).items():
                 setattr(task, key, value)
             return task
 
@@ -211,7 +230,7 @@ class Store:
             assert row is not None
             previous = row.status
             row.status = status
-            for key, value in fields.items():
+            for key, value in _sanitize(fields).items():
                 setattr(row, key, value)
             s.add(
                 WorkflowEvent(
@@ -303,7 +322,7 @@ class Store:
             row = s.get(AgentExecution, execution_id)
             assert row is not None
             row.finished_at = utcnow()
-            for key, value in fields.items():
+            for key, value in _sanitize(fields).items():
                 setattr(row, key, value)
 
     def executions(
@@ -329,7 +348,11 @@ class Store:
 
     def add_approval(self, run_id: str, kind: str, decision: str, note: str | None) -> None:
         with self.session() as s:
-            s.add(Approval(run_id=run_id, kind=kind, decision=decision, note=note))
+            s.add(
+                Approval(
+                    run_id=run_id, kind=kind, decision=decision, note=redact(note or "") or None
+                )
+            )
 
     def approvals(self, run_id: str) -> list[Approval]:
         with self.session() as s:
@@ -339,7 +362,7 @@ class Store:
 
     def record_command(self, **fields: Any) -> None:
         with self.session() as s:
-            s.add(CommandExecution(**fields))
+            s.add(CommandExecution(**_sanitize(fields)))
 
     def commands(self, run_id: str, *, purpose: str | None = None) -> list[CommandExecution]:
         with self.session() as s:

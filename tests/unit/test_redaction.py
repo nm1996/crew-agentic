@@ -42,3 +42,25 @@ def test_logging_filter_redacts_messages():
     record = logging.LogRecord("x", logging.INFO, "f", 1, "token %s", ("ghp_" + "a" * 30,), None)
     RedactingFilter().filter(record)
     assert "ghp_" not in record.getMessage()
+
+
+def test_structured_redaction_keeps_json_valid():
+    import json
+
+    from crew.security.redaction import redact_data, redact_json_text
+
+    payload = {"summary": 'set PASSWORD=hunter2\\" then run', "nested": [{"t": "TOKEN=abcd\\\\x"}]}
+    text = json.dumps(payload)
+    out = json.loads(redact_json_text(text))  # must still parse
+    assert "hunter2" not in out["summary"]
+    assert "abcd" not in out["nested"][0]["t"]
+    assert redact_data(5) == 5
+
+
+def test_text_redaction_of_json_would_corrupt_it():
+    """Documents why structured redaction exists (regression guard for H1)."""
+    import json
+
+    text = json.dumps({"s": 'PASSWORD=hunter2" x'})
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(redact(text))
