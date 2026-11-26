@@ -1,66 +1,44 @@
-# CREW
+# CREW documentation
 
-**CREW is a local-first AI development orchestration CLI.** It coordinates specialized AI agents to plan, implement, review, and independently evaluate software changes inside a Git repository.
+**CREW is a local-first AI development orchestration CLI.** It coordinates specialised AI
+agents to plan, implement, review, and independently evaluate software changes inside a
+Git repository. It is an orchestrator, not an autonomous replacement for the developer:
+important decisions and risky actions require explicit approval.
 
-The MVP is a Python CLI, Claude-first, provider-extensible, and designed for one developer working locally. CREW is an orchestrator, not an autonomous replacement for the developer: important decisions and risky actions require explicit approval.
+## Using CREW
+
+| Document | Read it when |
+|---|---|
+| [INSTALLATION.md](INSTALLATION.md) | Installing CREW and setting up a project; troubleshooting. |
+| [USAGE.md](USAGE.md) | Running a request end to end; command reference; exit codes; recovery. |
+| [CONFIGURATION.md](CONFIGURATION.md) | Changing `.crew/config.yaml`; verification commands; agent permissions. |
+
+## Specifications
+
+| Document | Contents |
+|---|---|
+| [PRODUCT_SPEC.md](PRODUCT_SPEC.md) | Purpose, target user, functional/non-functional requirements, MVP acceptance criteria. |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Modular-monolith boundaries, package layout, data flow, design rules. |
+| [WORKFLOW.md](WORKFLOW.md) | Run state machine, task model, review loop, failure, recovery, cancellation. |
+| [AGENT_ROLES.md](AGENT_ROLES.md) | Director, Implementer, Reviewer, External Evaluator contracts. |
+| [TECHNICAL_SPEC.md](TECHNICAL_SPEC.md) | Stack, CLI contract, configuration, provider interface, persistence, Git, artifacts, testing. |
+| [SECURITY.md](SECURITY.md) | Safety requirements, command policy, prompt injection, secrets, threat model. |
+| [DECISIONS.md](DECISIONS.md) | Decisions taken during implementation and known limitations. |
+| [ROADMAP.md](ROADMAP.md) | Milestones M0–M6 and their status. |
 
 ## Product principles
 
-- Local-first: project state and history live in the target repository under `.crew/`.
-- Human-controlled: the developer approves plans and final changes.
-- Explicit roles: Director, Implementer, Reviewer, and External Evaluator have distinct responsibilities.
-- Safe execution: permissions are enforced by code, not only by agent prompts.
-- Recoverable: workflow state survives process termination.
-- Small MVP: SQLite, local processes, Git worktrees, and clear interfaces. No distributed infrastructure.
+- **Local-first:** project state and history live in the target repository under `.crew/`.
+- **Human-controlled:** the developer approves plans and final changes.
+- **Explicit roles:** Director, Implementer, Reviewer, and External Evaluator have distinct
+  responsibilities.
+- **Safe execution:** permissions are enforced by code and provider flags, not by prompts.
+- **Recoverable:** workflow state survives process termination.
+- **Small:** SQLite, local processes, Git worktrees, clear interfaces. No distributed
+  infrastructure.
 
-## MVP capabilities
+## Non-goals for the MVP
 
-- Initialize a project with `crew init`.
-- Diagnose local prerequisites with `crew doctor`.
-- Run a request through analysis, planning, implementation, review, and independent evaluation.
-- Require approval before implementation and before final completion.
-- Run at most two implementation workers concurrently.
-- Isolate implementation tasks in Git worktrees.
-- Persist tasks, workflow state, events, and reports in SQLite.
-- Resume interrupted runs.
-- Generate Markdown reports.
-- Use Claude Code CLI as the first provider backend.
-- Use a fake provider in tests so the suite does not require API access.
-
-## Non-goals for MVP
-
-- Cloud service or hosted dashboard.
-- Multi-user collaboration.
-- Kubernetes, Redis, Kafka, NATS, or microservices.
-- Automatic push, merge, release, or deployment.
-- Unrestricted shell access.
-- Supporting every AI provider from day one.
-- A sophisticated terminal UI.
-
-## Documentation map
-
-- `PRODUCT_SPEC.md` — product requirements and acceptance criteria.
-- `ARCHITECTURE.md` — system boundaries and module design.
-- `WORKFLOW.md` — workflow state machine and transitions.
-- `AGENT_ROLES.md` — agent responsibilities and contracts.
-- `TECHNICAL_SPEC.md` — Python stack, interfaces, persistence, and Git strategy.
-- `SECURITY.md` — execution and approval safety requirements.
-- `ROADMAP.md` — implementation milestones and delivery order.
-- `CLAUDE.md` — instructions for Claude Code working in this repository.
-- `CONTRIBUTING.md` — engineering conventions.
-
-## Proposed technology baseline
-
-Use Python **3.12 or newer**, subject to dependency compatibility verified during project setup. Use `uv` for environment and dependency management.
-
-Core stack:
-- Typer — CLI.
-- Rich — terminal output.
-- Pydantic — configuration and structured agent output validation.
-- SQLAlchemy + SQLite — persistence.
-- Alembic — schema migrations.
-- pytest — tests.
-- asyncio — bounded concurrent orchestration.
-- Git CLI — authoritative Git operations; use a thin wrapper rather than hiding Git semantics.
-
-Claude Code CLI is an external executable and must be installed and authenticated separately. CREW must diagnose its availability and report actionable errors.
+Cloud service or hosted dashboard; multi-user collaboration; Kubernetes, Redis, Kafka,
+NATS or microservices; automatic push, merge, release or deployment; unrestricted shell
+access; every AI provider from day one; a sophisticated terminal UI.
