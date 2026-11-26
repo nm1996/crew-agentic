@@ -179,6 +179,9 @@ src/crew/
   config/schema.py, loader.py configuration model, hard limits, YAML I/O
   security/redaction.py       secret redaction (+ logging filter)
   security/execution_policy.py  command classification, guarded subprocess runner
+  security/secret_files.py    secret file patterns (context exclusion, commit filter)
+  system/processes.py         portable spawning, process-tree termination, PID identity, signals
+  system/locking.py           fcntl/msvcrt file lock
 ```
 
 The scheduler lives inside `engine.py` (`_implement_async`) because it is ~50 lines and

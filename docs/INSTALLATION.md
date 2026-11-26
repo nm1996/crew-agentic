@@ -4,7 +4,7 @@
 
 | Requirement | Version | Check | Notes |
 |---|---|---|---|
-| OS | Linux | – | macOS should work (POSIX process groups, `flock`); Windows is not supported in the MVP. |
+| OS | Linux, macOS, Windows 10/11 | – | All three are tested in CI. See the platform notes below. |
 | Python | ≥ 3.12 | `python3 --version` | `uv` can install it: `uv python install 3.12`. |
 | uv | recent | `uv --version` | <https://docs.astral.sh/uv/getting-started/installation/> |
 | Git | ≥ 2.25 | `git --version` | Needed for `git worktree`. |
@@ -65,12 +65,40 @@ crew configure 'execution.verification_commands=["uv run pytest -q"]' \
 
 See [CONFIGURATION.md](CONFIGURATION.md).
 
+## Platform notes
+
+### Linux and macOS
+
+Nothing special. Agent process trees run in their own session and are stopped as a group.
+
+### Windows
+
+- Install **Git for Windows** and enable long paths, because CREW worktrees are nested
+  inside your repository:
+
+  ```powershell
+  git config --global core.longpaths true
+  # and once, as administrator, if your Windows version needs it:
+  New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+    -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+  ```
+
+- Prefer the **native Claude Code build** (`claude.exe`). With an npm install
+  (`claude.cmd`), CREW runs `node …\@anthropic-ai\claude-code\cli.js` directly, because
+  cmd.exe would mangle the arguments; `node` must be on `PATH`.
+- Write verification commands as argument lists, e.g. `["npm", "test"]`; see
+  [CONFIGURATION.md](CONFIGURATION.md#verification-commands).
+- Keep projects on a local disk, not in OneDrive or on a network share (`crew doctor`
+  warns): SQLite and Git worktrees are unreliable there.
+- Under WSL, keep the repository inside the Linux filesystem (`~/…`), not under `/mnt/c`.
+
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | `doctor`: *Claude Code CLI not found* | Install Claude Code, make sure `claude` is on `PATH`, or set `provider.claude_code.executable` to its absolute path. |
 | `doctor`: *Claude CLI flags missing* | Update Claude Code (`claude update`). CREW refuses to run agents without `--restricted` and `--strict-mcp-config`. |
+| `doctor`: *… is a script shim that cannot be invoked safely* (Windows) | Install the native `claude.exe`, or put `node` on `PATH`. |
 | `doctor`: *could not detect a login* | Run `claude` once interactively and log in, or export `ANTHROPIC_API_KEY`. Detection is best-effort; this is a warning only. |
 | `approve-plan`: *working tree has uncommitted changes* | Commit your work. CREW never stashes or resets it for you. |
 | `error: Another CREW process is currently driving this run` | Another terminal is running that run. Wait, or `crew stop <run-id>`. |

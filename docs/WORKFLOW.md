@@ -41,6 +41,8 @@ Any active (non-terminal) state may transition to FAILED or CANCELLED through co
 - `PLAN_REJECTED`: developer rejected the proposed plan.
 - `REJECTED`: developer rejected the final result.
 
+`FAILED` is terminal for the engine; the developer may retry it with `crew retry`, which transitions `FAILED → <stage it failed in>` (one of ANALYZING, PLANNING, IMPLEMENTING, INTEGRATING, REVIEWING, CHANGES_REQUESTED, EXTERNAL_EVALUATION; never a gate). The stage is stored in `runs.failed_state`.
+
 Developer commands per gate: `crew approve-plan` / `crew reject-plan` at `AWAITING_PLAN_APPROVAL`; `crew accept` / `crew reject` at `AWAITING_FINAL_APPROVAL`.
 
 ## 3. Transition invariants
@@ -92,7 +94,7 @@ Only blocking findings should automatically return the run to implementation. No
 
 Limit automatic correction cycles with a configurable small default (for example, 2). When the limit is reached, stop and request developer input. Never loop indefinitely.
 
-**Implemented:** each `CHANGES_REQUESTED` creates one correction task `fix-<cycle>` containing all blocking findings, started from the current integration tip, and increments `runs.correction_cycle` (default limit `execution.max_correction_cycles: 2`). When the limit is reached with blocking findings left, the run proceeds to `EXTERNAL_EVALUATION` and then stops at `AWAITING_FINAL_APPROVAL` with a `correction_limit_reached` event and the unresolved findings highlighted in the report: that gate is the "request developer input". The evaluator's recommendation is advisory and never changes state by itself.
+**Implemented:** each `CHANGES_REQUESTED` creates one correction task `crew-fix-<cycle>` (the `crew-` prefix is reserved and rejected in plans) containing all blocking findings, started from the current integration tip, and increments `runs.correction_cycle` (default limit `execution.max_correction_cycles: 2`). When the limit is reached with blocking findings left, the run proceeds to `EXTERNAL_EVALUATION` and then stops at `AWAITING_FINAL_APPROVAL` with a `correction_limit_reached` event and the unresolved findings highlighted in the report: that gate is the "request developer input". The evaluator's recommendation is advisory and never changes state by itself.
 
 ## 6. Failure and recovery
 
@@ -120,4 +122,4 @@ Cancellation is cooperative:
 - preserve worktrees and diffs for inspection;
 - never delete uncommitted work automatically.
 
-**Implemented:** `crew stop` cancels immediately when no process holds the run lock; otherwise it sets `runs.cancel_requested`, which the driving process polls (every 0.5 s during implementation and between stages). Active provider processes are terminated by process group (SIGTERM, then SIGKILL after a 5 s grace period). Interrupting CREW itself (Ctrl-C) is *not* a cancellation: tasks are left resumable.
+**Implemented:** `crew stop` cancels immediately when no process holds the run lock (after reconciling leftover processes and tasks); otherwise it sets `runs.cancel_requested`, which the driving process polls every 0.5 s during every agent execution and verification command, and before checking gates. Active provider process trees are terminated (terminate, then kill after a 5 s grace period). Interrupting or terminating CREW itself (Ctrl-C, SIGTERM, SIGHUP, Ctrl-Break) is *not* a cancellation: agent trees are stopped and tasks are left resumable.

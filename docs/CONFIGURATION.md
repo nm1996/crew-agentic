@@ -14,18 +14,19 @@ provider:
     executable: claude          # name on PATH or absolute path
     timeout_seconds: 1800       # per agent execution (30 … 14400)
     model: null                 # e.g. "opus", "sonnet"; null = CLI default
-    max_budget_usd: null        # per agent execution, passed as --max-budget-usd
+    max_budget_usd: null        # per agent execution cap, passed as --max-budget-usd
     restricted: true            # always on: --restricted --strict-mcp-config (cannot be disabled)
-    implementer_bash_rules: []  # e.g. ["Bash(uv run pytest:*)", "Bash(npm test:*)"]
+    implementer_bash_rules: []  # e.g. ["Bash(uv run pytest:*)"]; on Windows also "PowerShell(...)"
     reviewer_bash_rules: []     # same syntax; lets the Reviewer run checks
 execution:
   max_implementers: 2           # 1 … 2 (hard limit)
   max_correction_cycles: 2      # 0 … 5
   max_task_attempts: 2          # 1 … 3 (a failed task is retried in a fresh worktree)
+  max_run_budget_usd: null      # total spend limit per run (USD); null = unlimited
   command_timeout_seconds: 600  # per verification command
   command_output_limit_bytes: 200000
   preserve_worktrees_on_failure: true
-  verification_commands: []     # e.g. ["uv run pytest -q", "uv run ruff check ."]
+  verification_commands: []     # strings or argv lists, e.g. ["uv run pytest -q", ["npm", "test"]]
 git:
   branch_prefix: crew           # branches: crew/<run>/integration, crew/<run>/<task>-a<n>
   worktree_directory: .crew/worktrees
@@ -46,16 +47,34 @@ These are not just defaults; values outside them are rejected:
 | `approvals.*` | must be `true` | Mandatory human gates (SECURITY.md §2). |
 | `execution.max_implementers` | 1–2 | MVP concurrency limit. |
 | `execution.max_correction_cycles` | 0–5 | Never loop indefinitely. |
-| `*_bash_rules` | each must be a scoped `Bash(...)` rule, not `Bash(*)` | No unrestricted shell. |
+| `provider.claude_code.restricted` | must be `true` | Agents always run with `--restricted --strict-mcp-config`. |
+| `*_bash_rules` | each must be a scoped `Bash(...)` / `PowerShell(...)` rule, not `Bash(*)` | No unrestricted shell. |
 | `git.worktree_directory` | must be under `.crew/` | CREW only writes to paths it owns. |
-| `execution.verification_commands` | no shells, no `rm`/`sudo`/network tools, no pipes or redirects | They run unattended, without a shell. |
+| `execution.verification_commands` | no shells (`sh`, `bash`, `cmd`, `powershell`), no `rm`/`sudo`/`del`/network tools, no pipes or redirects; Windows batch files (`npm.cmd`) without cmd.exe metacharacters | They run unattended, without a shell. |
 
 ## Verification commands
 
 Commands in `execution.verification_commands` are executed **by CREW** (not by an agent)
-in the integration worktree after each integration. They are split with `shlex`, run
-without a shell, with a minimal environment (`PATH`, `HOME`, locale, `VIRTUAL_ENV`,
-`CI=1`), a timeout and an output limit; output is redacted. Their results are the
+in the integration worktree after each integration. Each entry is either a string, split
+like a shell would (but never run by one), or an explicit argument list — the most
+portable form, recommended on Windows:
+
+```yaml
+verification_commands:
+  - uv run pytest -q
+  - ["npm", "test"]
+  - ["python", "-m", "mypy", "src"]
+```
+
+The program is resolved on `PATH` (with `PATHEXT` on Windows). Commands run with a
+minimal environment (`PATH`, `HOME`, locale, `VIRTUAL_ENV`, `CI=1`, plus required Windows
+system variables), a timeout and an output limit; output is redacted. A program that
+cannot be started is recorded as exit code 127.
+
+> **Security note:** verification commands run code that agents may have written or
+> changed (test files, `conftest.py`, `package.json` scripts, `Makefile`). Configuring
+> them effectively lets agent-authored code run as your user. See
+> [DECISIONS.md](DECISIONS.md#known-limitations). Their results are the
 trustworthy test evidence given to the Reviewer and the External Evaluator and shown in
 reports. A failing command does not stop the run; it becomes evidence.
 
@@ -74,6 +93,14 @@ crew configure 'provider.claude_code.implementer_bash_rules=["Bash(uv run pytest
 
 Anything not allowed is denied automatically (`--permission-prompts none`); no one can
 approve an escalation in the middle of a run.
+
+## Run budget
+
+`execution.max_run_budget_usd` limits the total provider-reported cost of one run. Each
+agent execution gets the remaining budget as its `--max-budget-usd` (split between
+concurrent Implementers). When it is used up, no further agent starts and the run fails
+with exit code 11; raise the limit and `crew retry <run-id>`. `crew status` shows the cost
+so far.
 
 ## Project notes for the Director
 

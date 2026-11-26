@@ -22,11 +22,13 @@ crew run "Add health checks to the API"
   by CLI flags, not prompts.
 - **Observable** – every state transition, agent execution and command is recorded in
   SQLite, with Markdown evidence reports per run.
-- **Recoverable** – kill the process at any point and `crew resume` continues safely.
+- **Recoverable** – kill the process at any point and `crew resume` continues safely;
+  `crew retry` picks a failed run up where it stopped. An optional per-run budget caps
+  spending.
 
 ## Quick start
 
-Requirements: Linux (macOS likely works), Python ≥ 3.12, Git ≥ 2.25,
+Requirements: Linux, macOS or Windows; Python ≥ 3.12; Git ≥ 2.25;
 [uv](https://docs.astral.sh/uv/), and the [Claude Code CLI](https://docs.claude.com/claude-code)
 installed and logged in (not needed for the offline demo).
 
@@ -74,7 +76,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Status
 
-`0.1.0` — MVP. Linux-first, single developer, Claude Code CLI as the only real provider.
+`0.2.0` — hardened MVP, tested on Linux, macOS and Windows. Single developer, Claude Code
+CLI as the only real provider.
 See [docs/ROADMAP.md](docs/ROADMAP.md) and the known limitations in
 [docs/DECISIONS.md](docs/DECISIONS.md#known-limitations).
 

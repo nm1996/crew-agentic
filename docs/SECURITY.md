@@ -86,12 +86,17 @@ Document residual risks rather than claiming perfect isolation. A Git worktree i
 | Gates cannot be disabled | `approvals.*` typed `Literal[True]` | `tests/unit/test_config.py` |
 | Implementers confined to their worktree | agent `cwd` is always a CREW worktree; `--restricted` | `test_every_agent_runs_in_a_crew_owned_worktree` |
 | Read-only roles | Director/Reviewer/Evaluator get only `Read,Glob,Grep` in `dontAsk` mode | `tests/unit/test_claude_adapter.py` |
-| No permission bypass | adapter never emits bypass flags; `--permission-prompts none` | `test_never_bypasses_permissions` |
+| No permission bypass | adapter never emits bypass flags; `--permission-prompts none`; `--restricted` and `--strict-mcp-config` are mandatory and precede all free text | `test_never_bypasses_permissions`, `test_security_flags_precede_free_text`, `test_restricted_cannot_be_disabled` |
+| No writes to the developer's worktree | git wrapper refuses every write command outside CREW worktrees; hooks disabled for all git calls | `test_writes_are_refused_in_the_user_worktree`, `test_repository_hooks_never_run` |
+| Read-only agents cannot affect integration | Reviewer/Evaluator run in disposable snapshot worktrees; integration must be clean before merging | `test_reviewer_and_evaluator_cannot_dirty_the_integration_worktree` |
+| Agent processes never outlive CREW | process-tree termination (psutil + process groups), SIGTERM/SIGHUP/SIGBREAK handling, PID-reuse-safe orphan cleanup | `tests/unit/test_system.py`, `test_stop_after_driver_died_reconciles_leftovers` |
+| Spending is bounded | `execution.max_run_budget_usd`, passed per execution as `--max-budget-usd` | `test_run_budget_stops_spending` |
 | User changes never overwritten | dirty tree blocks `approve-plan`; no stash/reset/clean anywhere; cleanup uses `git worktree remove` (refuses dirty trees) | `test_approval_refused_on_dirty_tree`, `test_dirty_worktree_is_preserved_on_cleanup` |
 | Timeouts and output limits | `security/execution_policy.py::run_command`, adapter `timeout_seconds`, process-group termination | `test_run_command_times_out_and_kills`, `test_execute_timeout_kills_process` |
-| Secret redaction; no env persisted | `security/redaction.py` applied to prompts, outputs, commands, events, logs; minimal env for commands | `tests/unit/test_redaction.py`, `test_run_command_does_not_leak_environment` |
+| Secret redaction; no env persisted | `security/redaction.py` applied centrally by the store (structurally for JSON) and to artifacts and logs; minimal env for commands | `tests/unit/test_redaction.py`, `test_json_columns_stay_valid_after_redaction`, `test_run_command_does_not_leak_environment` |
+| Secrets not committed | new `.env`/key files are kept out of CREW commits | `test_commit_all_keeps_new_secret_files_out` |
 | Secret files excluded from context | `context/collector.py::SECRET_GLOBS`, passed as `Read(...)` deny rules; agents see committed files only | `test_never_bypasses_permissions` |
-| Commands recorded | `command_executions` table (git + verification), `agent_executions` | `test_verification_commands_are_recorded_as_evidence` |
+| Commands recorded | `command_executions` table (git + verification), `agent_executions` | `test_verification_commands_are_recorded_as_evidence`, `test_git_commands_are_recorded_per_run` |
 | No shell interpolation | every subprocess uses argument lists; verification commands refuse shells/operators | `tests/unit/test_execution_policy.py` |
 
 Residual risks are listed in [DECISIONS.md](DECISIONS.md#known-limitations).

@@ -50,12 +50,14 @@ git merge --no-ff crew/<id>/integration   # CREW never merges for you
 | `crew reject-plan <id> [-m note]` | End the run as `PLAN_REJECTED`. |
 | `crew accept <id> [-m note]` | Final approval → `COMPLETED`. |
 | `crew reject <id> [-m note]` | Final rejection → `REJECTED`. |
-| `crew status [id]` | State of a run (default: latest). |
+| `crew status [id]` | State and cost of a run (default: latest). |
 | `crew tasks <id>` | Task table: status, dependencies, attempts, commits. |
 | `crew history [--limit N]` | Previous runs. |
 | `crew show <id> [--json]` | Events, agent executions, artifacts. `--json` for scripting. |
 | `crew resume <id>` | Reconcile and continue an interrupted run. |
+| `crew retry <id> [-m note]` | Retry a `FAILED` run from the stage it failed in; failed tasks get fresh attempts. |
 | `crew stop <id>` | Cancel: immediately if no process is driving the run, otherwise cooperatively. |
+| `crew cleanup <id>\|--all [--branches]` | Remove finished runs' clean worktrees; `--branches` also deletes merged CREW branches. |
 | `crew report <id> [--path]` | Regenerate and display `final-report.md`. |
 
 ### Exit codes
@@ -73,6 +75,7 @@ git merge --no-ff crew/<id>/integration   # CREW never merges for you
 | 8 | Git error. |
 | 9 | Provider error. |
 | 10 | Invalid plan. |
+| 11 | Run budget exhausted (`execution.max_run_budget_usd`). |
 | 130 | Interrupted (Ctrl-C); state preserved for `crew resume`. |
 
 ## Run states
@@ -117,20 +120,46 @@ worktree (the old one is kept for inspection), completed tasks must still have t
 commits, and a half-finished merge in the integration worktree is aborted. If safe
 recovery cannot be established, CREW stops and tells you why.
 
+## Retrying a failed run
+
+A run ends `FAILED` when, for example, an agent keeps timing out, returns invalid output,
+the budget runs out, or a merge conflicts. Its worktrees and branches are preserved.
+After fixing the cause (raise the timeout or budget, fix credentials, …):
+
+```bash
+crew retry <run-id> -m "raised timeout"
+```
+
+CREW records the retry as a developer decision and continues from the stage it failed in.
+Completed tasks are kept; failed, blocked and cancelled tasks of the current cycle get a
+new attempt in a fresh worktree. A retry never skips a gate. Retrying a merge conflict
+fails again unless something changed: start a new run with a plan that avoids overlapping
+tasks.
+
 ## Cancellation
 
 `crew stop <run-id>` cancels immediately when no CREW process is driving the run. If one
-is (e.g. another terminal is in the implementation stage), it sets a flag; the driver stops
-dispatching, terminates active agent processes and ends the run as `CANCELLED`. Worktrees
-and branches are always preserved.
+is (e.g. another terminal is running the workflow), it sets a flag; within about half a
+second the driver stops whatever is running — Director, Implementers, Reviewer,
+Evaluator or a verification command — terminates the agent process trees and ends the run
+as `CANCELLED`. Worktrees and branches are preserved.
+
+CREW also stops its agents when it is terminated itself (Ctrl-C, SIGTERM, closed terminal
+on POSIX, Ctrl-Break on Windows). If it is killed hard (SIGKILL, power loss), leftover agent
+processes are found and stopped the next time you `resume`, `retry` or `stop` the run.
 
 ## Cleanup
 
 After `accept`, `reject` or `reject-plan`, CREW removes its own worktrees that contain no
-uncommitted work; branches are kept. Failed or cancelled runs keep everything. To delete
-CREW branches of a finished run yourself:
+uncommitted work; branches are kept. Failed or cancelled runs keep everything (unless
+`execution.preserve_worktrees_on_failure: false`, which still only removes clean ones).
 
 ```bash
-git branch --list 'crew/<run-id>/*' | xargs -r git branch -D
-git worktree prune
+crew cleanup <run-id>              # remove clean worktrees of a finished run
+crew cleanup --all --branches      # every finished run, plus merged CREW branches
 ```
+
+Branch rules with `--branches`: task branches are deleted once their work is in the
+integration branch; the integration branch of a completed run only after you merged it;
+FAILED runs keep all branches so they can still be retried. Worktrees with uncommitted
+changes are never removed.

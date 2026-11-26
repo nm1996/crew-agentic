@@ -38,6 +38,7 @@ Initial commands:
 - `crew report <run-id>`
 - `crew accept <run-id>` / `crew reject <run-id>` (final gate; added during implementation)
 - `crew history`
+- `crew retry <run-id>` and `crew cleanup <run-id>|--all [--branches]` (added in 0.2.0)
 
 Exit codes are documented in [USAGE.md](USAGE.md#exit-codes) and `src/crew/cli/app.py`.
 
@@ -73,7 +74,7 @@ approvals:
 
 Validate hard safety limits in code. Configuration must not allow disabling mandatory approval gates in MVP.
 
-**Implemented shape:** see [CONFIGURATION.md](CONFIGURATION.md) and `src/crew/config/schema.py`. Changes from the example above: `git.integration_branch_prefix` became `git.branch_prefix` (branches are `<prefix>/<run>/integration` and `<prefix>/<run>/<task>-a<attempt>`); added `provider.claude_code.{model,max_budget_usd,restricted,implementer_bash_rules,reviewer_bash_rules}`, `execution.{max_task_attempts,command_output_limit_bytes,verification_commands}` and a `context` section. `approvals.*` are typed `Literal[True]`.
+**Implemented shape:** see [CONFIGURATION.md](CONFIGURATION.md) and `src/crew/config/schema.py`. Changes from the example above: `git.integration_branch_prefix` became `git.branch_prefix` (branches are `<prefix>/<run>/integration` and `<prefix>/<run>/<task>-a<attempt>`); added `provider.claude_code.{model,max_budget_usd,restricted,implementer_bash_rules,reviewer_bash_rules}`, `execution.{max_task_attempts,max_run_budget_usd,command_output_limit_bytes,verification_commands}` and a `context` section. `provider.claude_code.restricted` is `Literal[True]` since 0.2.0. `approvals.*` are typed `Literal[True]`.
 
 ## 4. Provider interface
 
@@ -168,4 +169,4 @@ The SQLite database is authoritative for workflow state. Markdown artifacts are 
 - Failure tests: provider timeout, malformed output, process termination, interrupted run, missing worktree, dirty repository, dependency failure, merge conflict, cancellation.
 - Avoid tests that merely mirror implementation details. Test observable behavior and invariants.
 
-**Implemented layout:** `tests/unit` (pure logic, adapter with a stub executable), `tests/integration` (temporary Git repositories: init, doctor, worktrees, store), `tests/e2e` (complete fake-provider workflows and the CLI). The real Claude smoke tests in `tests/e2e/test_claude_smoke.py` run only with `CREW_CLAUDE_SMOKE=1`.
+**Implemented layout:** CI runs the suite on Linux, macOS and Windows with Python 3.12 and 3.13. `tests/unit` (pure logic, adapter with a stub executable), `tests/integration` (temporary Git repositories: init, doctor, worktrees, store), `tests/e2e` (complete fake-provider workflows and the CLI). The real Claude smoke tests in `tests/e2e/test_claude_smoke.py` run only with `CREW_CLAUDE_SMOKE=1`.
