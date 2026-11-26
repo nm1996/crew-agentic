@@ -3,7 +3,7 @@
 Exit codes: 0 success; 1 generic CREW error; 2 configuration/not initialised;
 3 precondition; 4 invalid transition; 5 not found; 6 run locked; 7 policy
 violation; 8 git error; 9 provider error; 10 invalid plan; 11 budget exhausted;
-130 interrupted.
+12 unresolved merge conflict; 13 integration error; 130 interrupted.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from rich.table import Table
 
 from crew import __version__
 from crew.application import doctor as doctor_service
+from crew.application.integrations import gather_sources
 from crew.application.project import (
     config_as_json,
     init_project,
@@ -33,6 +34,7 @@ from crew.application.project import (
 )
 from crew.domain.enums import GATE_STATES, TERMINAL_STATES, RunState
 from crew.domain.errors import CrewError, NotFoundError
+from crew.integrations import factory as integration_factory
 from crew.persistence.models import Run
 from crew.system.processes import install_termination_handlers
 
@@ -212,12 +214,104 @@ def configure(
 @app.command()
 @handle_errors
 def run(
-    request: Annotated[str, typer.Argument(help="What you want done, in plain language.")],
+    request: Annotated[
+        str | None, typer.Argument(help="What you want done, in plain language.")
+    ] = None,
+    issue: Annotated[
+        str | None, typer.Option("--issue", help="Use this issue (e.g. PROJ-123) as the request.")
+    ] = None,
+    doc: Annotated[
+        list[str] | None,
+        typer.Option("--doc", help="Add a documentation page (id, URL or path) to the context."),
+    ] = None,
+    pr_comments: Annotated[
+        int | None,
+        typer.Option("--pr-comments", help="Address the review comments on this PR number."),
+    ] = None,
 ) -> None:
     """Start a run: analyse, plan, and stop at the plan-approval gate."""
     project = open_project()
-    result = make_orchestrator(project, _notify).start_run(request)
+    sources = gather_sources(
+        project, request, issue_key=issue, doc_refs=doc, pr_comments=pr_comments
+    )
+    if sources.issue_key:
+        console.print(f"Request from {sources.issue_key}:", style="dim")
+    for page in sources.docs:
+        console.print(f"Context: {page.title} ({page.url or page.ref})", style="dim")
+    result = make_orchestrator(project, _notify).start_run(
+        sources.request, issue_key=sources.issue_key, linked_docs=sources.docs
+    )
     _after_drive(result)
+
+
+@app.command()
+@handle_errors
+def publish(
+    run_id: RunIdArg,
+    pr: Annotated[
+        bool, typer.Option("--pr", help="Push the integration branch and open a PR.")
+    ] = False,
+    draft: Annotated[bool, typer.Option("--draft", help="Open the PR as a draft.")] = False,
+    review: Annotated[
+        bool, typer.Option("--review", help="Post the Reviewer's findings on the PR.")
+    ] = False,
+    docs: Annotated[
+        bool, typer.Option("--docs", help="Publish the final report to the docs target.")
+    ] = False,
+    issue: Annotated[
+        bool, typer.Option("--issue/--no-issue", help="Update the linked issue, if any.")
+    ] = True,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Do not ask for confirmation.")] = False,
+) -> None:
+    """Share a COMPLETED run: PR, review, issue comment, report page (explicit only)."""
+    project = open_project()
+    run = project.store.get_run(run_id)
+    config = project.config
+    actions: list[str] = []
+    host = tracker = target = None
+    if pr or review:
+        host = integration_factory.code_host(config)
+    if pr:
+        remote = config.integrations.code_host.remote  # type: ignore[union-attr]
+        actions.append(f"push {run.integration_branch} to {remote} and open a pull request")
+    if review:
+        actions.append("post the Reviewer's findings as a PR review")
+    if issue and run.issue_key and config.integrations.issue_tracker:
+        tracker = integration_factory.issue_tracker(config)
+        actions.append(f"comment on {run.issue_key}")
+        if config.integrations.issue_tracker.transition_on_publish:
+            actions.append(
+                f"move {run.issue_key} to {config.integrations.issue_tracker.transition_on_publish}"
+            )
+    if docs:
+        target = integration_factory.docs_target(config, project.paths.root)
+        actions.append(f"publish the report via {target.name}")
+    if not actions:
+        raise CrewError("Nothing to publish: pass --pr, --review and/or --docs.")
+    console.print("CREW will:")
+    for action in actions:
+        console.print(f"  • {action}")
+    if not yes and not typer.confirm("Proceed?", default=False):
+        raise typer.Exit(1)
+    result = make_orchestrator(project, _notify).publish(
+        run_id,
+        code_host=host,
+        open_pr=pr,
+        draft=draft,
+        post_review=review,
+        issue_tracker=tracker,
+        docs=target,
+    )
+    if result.pull_request:
+        console.print(f"Pull request: [bold]{result.pull_request.url}[/]")
+    if result.review_posted:
+        console.print("Review posted.")
+    if result.issue_commented:
+        console.print(f"Commented on {run.issue_key}.")
+    if result.issue_transitioned:
+        console.print(f"Moved {run.issue_key} to {result.issue_transitioned}.")
+    if result.doc_url:
+        console.print(f"Report published: {result.doc_url}")
 
 
 @app.command("approve-plan")

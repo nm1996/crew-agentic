@@ -54,6 +54,7 @@ from crew.domain.task_graph import (
     topological_order,
     validate_graph,
 )
+from crew.integrations.base import CodeHost, DocPage, DocsTarget, IssueTracker, PublishResult
 from crew.orchestrator import recovery
 from crew.orchestrator.lock import RunLock
 from crew.orchestrator.state_machine import is_terminal, retry_target
@@ -78,6 +79,9 @@ log = logging.getLogger(__name__)
 Notify = Callable[[str], None]
 T = TypeVar("T")
 
+# Linked documentation (Confluence pages, …) added to the Director's context.
+LINKED_DOCS_MAX_CHARS = 30_000
+
 # How often running stages check for a developer cancellation request.
 CANCEL_POLL_SECONDS = 0.5
 
@@ -87,6 +91,21 @@ CURRENT_RUN: ContextVar[str | None] = ContextVar("crew_current_run", default=Non
 
 class RunCancelled(Exception):
     """Raised inside a stage when the developer requested cancellation."""
+
+
+def _pr_title(run: Run) -> str:
+    first = run.request.strip().splitlines()[0] if run.request.strip() else run.id
+    title = first if len(first) <= 72 else first[:69] + "…"
+    if run.issue_key and not title.startswith(run.issue_key):
+        title = f"{run.issue_key}: {title}"
+    return title
+
+
+def _pr_number(url: str | None) -> int | None:
+    if not url:
+        return None
+    tail = url.rstrip("/").rsplit("/", 1)[-1]
+    return int(tail) if tail.isdigit() else None
 
 
 def _expect[M](value: object, cls: type[M]) -> M:
@@ -138,7 +157,18 @@ class Orchestrator:
     # Public use cases
     # ======================================================================
 
-    def start_run(self, request: str) -> Run:
+    def start_run(
+        self,
+        request: str,
+        *,
+        issue_key: str | None = None,
+        linked_docs: list[DocPage] | None = None,
+    ) -> Run:
+        """Create a run and drive it to the plan gate.
+
+        ``linked_docs`` (e.g. Confluence pages) are added to the Director's
+        context; ``issue_key`` links the run to an issue for `crew publish`.
+        """
         request = request.strip()
         if not request:
             raise PreconditionError("The request must not be empty.")
@@ -155,8 +185,18 @@ class Orchestrator:
             base_commit=head,
         )
         self.store.update_run(
-            run.id, integration_branch=self.p.workspace.integration_branch(run.id)
+            run.id,
+            integration_branch=self.p.workspace.integration_branch(run.id),
+            issue_key=issue_key,
         )
+        if linked_docs:
+            renderer.write_artifact(
+                self.store,
+                self.p.paths.run_dir(run.id),
+                run.id,
+                "linked-docs.md",
+                renderer.render_linked_docs(linked_docs),
+            )
         if not status.is_clean:
             msg = (
                 f"working tree has {len(status.dirty_paths)} uncommitted change(s); planning uses "
@@ -267,6 +307,73 @@ class Orchestrator:
             )
             return self._drive_locked(run_id)
 
+    def publish(
+        self,
+        run_id: str,
+        *,
+        code_host: CodeHost | None = None,
+        open_pr: bool = False,
+        draft: bool = False,
+        post_review: bool = False,
+        issue_tracker: IssueTracker | None = None,
+        docs: DocsTarget | None = None,
+    ) -> PublishResult:
+        """Share a COMPLETED run: push + PR, review, issue update, report page.
+
+        The only place CREW talks to the outside world on its own initiative, and
+        only because the developer ran `crew publish`. Every step is recorded.
+        """
+        with self._lock(run_id):
+            run = self._require_state(run_id, RunState.COMPLETED)
+            result = PublishResult()
+            report = self.write_report(run_id)
+            settings = self.config.integrations.code_host
+            self.store.add_approval(run_id, ApprovalKind.PUBLISH, ApprovalDecision.APPROVED, None)
+
+            if open_pr and code_host is not None and settings is not None:
+                branch = self.p.workspace.integration_branch(run_id)
+                self.p.git.push_owned_branch(
+                    settings.remote, branch, f"{self.p.workspace.prefix}/{run_id}/"
+                )
+                result.pushed_branch = branch
+                self.store.add_event(run_id, "published_branch", f"{settings.remote} {branch}")
+                base = settings.base_branch or run.base_branch
+                if not base:
+                    raise PreconditionError("cannot open a PR: the run has no base branch")
+                pr = code_host.open_pull_request(branch, base, _pr_title(run), report, draft=draft)
+                result.pull_request = pr
+                self.store.update_run(run_id, pull_request_url=pr.url)
+                self.store.add_event(run_id, "pull_request_opened", pr.url)
+                run = self.store.get_run(run_id)
+
+            if post_review and code_host is not None:
+                number = _pr_number(run.pull_request_url)
+                if number is None:
+                    raise PreconditionError("no pull request to review; publish with --pr first")
+                review = self.store.latest_output(run_id, Role.REVIEWER) or {}
+                code_host.post_review(number, renderer.render_review_comment(review))
+                result.review_posted = True
+                self.store.add_event(run_id, "review_posted", run.pull_request_url or "")
+
+            if issue_tracker is not None and run.issue_key:
+                tracker_settings = self.config.integrations.issue_tracker
+                if tracker_settings is None or tracker_settings.comment_on_publish:
+                    issue_tracker.comment(run.issue_key, renderer.render_issue_comment(run))
+                    result.issue_commented = True
+                    self.store.add_event(run_id, "issue_commented", run.issue_key)
+                if tracker_settings is not None and tracker_settings.transition_on_publish:
+                    issue_tracker.transition(run.issue_key, tracker_settings.transition_on_publish)
+                    result.issue_transitioned = tracker_settings.transition_on_publish
+                    self.store.add_event(
+                        run_id, "issue_transitioned", tracker_settings.transition_on_publish
+                    )
+
+            if docs is not None:
+                title = f"CREW report {run_id}: {_pr_title(run)}"
+                result.doc_url = docs.publish_page(title, report)
+                self.store.add_event(run_id, "report_published", result.doc_url)
+            return result
+
     def resume(self, run_id: str) -> Run:
         with self._lock(run_id):
             run = self.store.get_run(run_id)
@@ -338,9 +445,11 @@ class Orchestrator:
             max_files=self.config.context.max_files_listed,
             exclude=tuple(self.config.context.exclude),
         )
-        renderer.write_artifact(
-            self.store, self._run_dir(run), run.id, "context.md", ctx.to_markdown()
-        )
+        context_md = ctx.to_markdown()
+        linked = self._run_dir(run) / "linked-docs.md"
+        if linked.exists():
+            context_md += "\n\n" + linked.read_text(encoding="utf-8")[:LINKED_DOCS_MAX_CHARS]
+        renderer.write_artifact(self.store, self._run_dir(run), run.id, "context.md", context_md)
         self._transition(run.id, RunState.PLANNING, f"collected context: {ctx.total_files} files")
 
     def _plan(self, run: Run) -> None:

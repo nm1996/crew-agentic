@@ -130,6 +130,7 @@ def check_project(cwd: Path) -> tuple[list[Check], CrewConfig | None]:
         return [Check("Configuration", Level.FAIL, exc.message, "Fix .crew/config.yaml.")], None
     checks = [Check("Configuration", Level.OK, f"provider={config.provider.default}")]
     checks.append(check_sandbox(config))
+    checks += check_integrations(config)
     current, head = schema_status(paths.db_file)
     if current == head:
         checks.append(Check("Database", Level.OK, f"schema {current}"))
@@ -153,6 +154,36 @@ def check_project(cwd: Path) -> tuple[list[Check], CrewConfig | None]:
                 Check(label, Level.FAIL, f"{directory} missing or not writable", "Run `crew init`.")
             )
     return checks, config
+
+
+def check_integrations(config: CrewConfig) -> list[Check]:
+    """Configured integrations and their credential variables (no network calls)."""
+    integrations = config.integrations
+    checks: list[Check] = []
+    pairs = [
+        ("Issue tracker", integrations.issue_tracker),
+        ("Code host", integrations.code_host),
+        ("Docs", integrations.docs),
+    ]
+    for label, settings in pairs:
+        if settings is None:
+            continue
+        envs = [getattr(settings, a) for a in ("email_env", "token_env") if hasattr(settings, a)]
+        missing = [e for e in envs if not os.environ.get(e)]
+        if label == "Code host" and missing and shutil.which("gh"):
+            missing = []  # GitHub falls back to `gh auth token`
+        if missing:
+            checks.append(
+                Check(
+                    label,
+                    Level.WARN,
+                    f"{settings.kind}: {', '.join(missing)} not set",
+                    f"export {missing[0]}=… before `crew run --issue` / `crew publish`.",
+                )
+            )
+        else:
+            checks.append(Check(label, Level.OK, f"{settings.kind} configured"))
+    return checks
 
 
 def check_sandbox(config: CrewConfig) -> Check:

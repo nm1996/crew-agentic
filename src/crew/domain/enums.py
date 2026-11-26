@@ -76,6 +76,8 @@ class ApprovalKind(StrEnum):
     PLAN = "PLAN"
     FINAL = "FINAL"
     RETRY = "RETRY"  # developer asked to retry a FAILED run
+    PUBLISH = "PUBLISH"  # developer published a completed run (push / PR / issue / docs)
+    PERMISSION = "PERMISSION"  # developer answered an agent's permission request
 
 
 class ApprovalDecision(StrEnum):

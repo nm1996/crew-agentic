@@ -153,6 +153,39 @@ def render_tasks(tasks: list[Task]) -> str:
     return "\n".join(lines)
 
 
+def render_linked_docs(pages: list) -> str:
+    lines = ["## Linked documentation (provided by the developer)", ""]
+    for page in pages:
+        lines += [f"### {page.title}", "", f"Source: {page.url or page.ref}", "", page.body, ""]
+    return "\n".join(lines)
+
+
+def render_review_comment(review: dict[str, Any]) -> str:
+    """Reviewer findings as a pull-request review body."""
+    findings = review.get("findings", [])
+    lines = ["**CREW Reviewer**", "", review.get("assessment", "")]
+    if findings:
+        lines += ["", "| Severity | Finding | Location | Blocking |", "|---|---|---|---|"]
+        for f in findings:
+            loc = f.get("file") or "-"
+            if f.get("line_start"):
+                loc += f":{f['line_start']}"
+            title = str(f.get("title", "")).replace("|", "\\|")
+            blocking = "yes" if f.get("blocking") else "no"
+            lines.append(f"| {f.get('severity')} | {title} | `{loc}` | {blocking} |")
+    return "\n".join(lines)
+
+
+def render_issue_comment(run: Run) -> str:
+    lines = [f"CREW run {run.id} was completed and accepted by the developer."]
+    if run.pull_request_url:
+        lines += ["", f"Pull request: {run.pull_request_url}"]
+    plan = run.plan or {}
+    if plan.get("approach"):
+        lines += ["", "Approach:", str(plan["approach"])]
+    return "\n".join(lines)
+
+
 def render_usage(executions: list) -> str:
     """Cost, time, turns and tokens per role (provider-reported)."""
     if not executions:
