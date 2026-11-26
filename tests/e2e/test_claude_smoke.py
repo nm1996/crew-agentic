@@ -8,6 +8,7 @@ It runs the Director (read-only) on a tiny repository; this costs a small amount
 
 import os
 import shutil
+import subprocess
 
 import pytest
 
@@ -46,3 +47,33 @@ def test_full_run_with_real_implementer(project, repo):
     content = real.git.run("show", f"{run.integration_branch}:app.py")
     assert "def goodbye" in content
     assert "goodbye" not in (repo / "app.py").read_text()  # user tree untouched
+
+
+def test_implementer_can_use_a_scoped_shell_rule(project, repo):
+    """Scoped shell rules (with spaces) reach Claude intact and are honoured.
+
+    POSIX uses a Bash(...) rule; Windows additionally grants PowerShell(...),
+    whichever shell tool the installed Claude Code offers.
+    """
+    python = "python" if os.name == "nt" else "python3"
+    rules = [f"Bash({python} --version:*)"]
+    if os.name == "nt":
+        rules.append(f"PowerShell({python} --version:*)")
+    configure(
+        open_project(repo),
+        ["provider.default=claude_code", f"provider.claude_code.implementer_bash_rules={rules}"],
+    )
+    real = open_project(repo)
+    orch = make_orchestrator(real, notify=print)
+    run = orch.start_run(
+        f"Run the shell command `{python} --version` and write its exact output into a new "
+        "file version.txt. Do not change anything else."
+    )
+    assert run.state == RunState.AWAITING_PLAN_APPROVAL, run.failure_reason
+    run = orch.approve_plan(run.id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL, run.failure_reason
+    content = real.git.run("show", f"{run.integration_branch}:version.txt")
+    actual = subprocess.run(
+        [python, "--version"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert actual in content  # the agent ran the command rather than guessing
