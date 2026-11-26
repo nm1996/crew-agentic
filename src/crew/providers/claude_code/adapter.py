@@ -32,8 +32,8 @@ from crew.config.schema import ClaudeCodeSettings
 from crew.domain.errors import ProviderError
 from crew.providers.base import AgentRequest, AgentResult, ProcessStarted
 from crew.providers.claude_code.parser import parse_cli_output
-from crew.security.execution_policy import terminate_process_group
 from crew.security.redaction import redact
+from crew.system.processes import process_started_at, spawn_kwargs, terminate_tree
 
 READ_TOOLS = ("Read", "Glob", "Grep")
 EDIT_TOOLS = ("Edit", "Write")
@@ -117,25 +117,26 @@ class ClaudeCodeProvider:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=_child_env(),
-            start_new_session=True,  # own process group so timeouts kill children too
             limit=MAX_CAPTURE_BYTES,
+            **spawn_kwargs(),  # own process group so the whole agent tree can be stopped
         )
         if on_process_start:
-            on_process_start(proc.pid)
+            on_process_start(proc.pid, process_started_at(proc.pid))
         try:
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(request.prompt.encode("utf-8")), timeout=timeout_seconds
             )
         except TimeoutError:
-            stopped = await terminate_process_group(proc)
+            stopped = await terminate_tree(proc)
             raise ProviderError(
                 f"Claude CLI timed out after {timeout_seconds}s"
                 + ("" if stopped else " and could not be stopped"),
                 kind="timeout",
             ) from None
         except asyncio.CancelledError:
-            await terminate_process_group(proc)
+            await terminate_tree(proc)
             raise
+        await terminate_tree(proc)  # leftover tool subprocesses must not outlive the agent
 
         out_text = stdout[:MAX_CAPTURE_BYTES].decode("utf-8", errors="replace")
         err_text = redact(stderr[-4000:].decode("utf-8", errors="replace")).strip()

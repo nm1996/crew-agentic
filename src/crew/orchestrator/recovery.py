@@ -2,7 +2,8 @@
 
 Rules:
 * Executions left RUNNING are marked INTERRUPTED; a still-alive orphaned agent
-  process (verified by its command line) is terminated.
+  process tree is terminated, after verifying (creation time + command line)
+  that the PID was not reused.
 * Tasks left RUNNING go back to PENDING. Their worktree is *preserved*; the next
   attempt gets a fresh worktree and branch. Partial changes are never assumed to
   be a completed task.
@@ -14,14 +15,13 @@ Rules:
 
 from __future__ import annotations
 
-import os
-import signal
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from crew.domain.enums import ExecutionStatus, RunState, TaskStatus
 from crew.domain.errors import PreconditionError
 from crew.persistence.models import Run
+from crew.system.processes import is_same_process, kill_tree
 
 if TYPE_CHECKING:
     from crew.orchestrator.engine import Project
@@ -36,24 +36,10 @@ _PAST_IMPLEMENTATION = {
 }
 
 
-def _process_cmdline(pid: int) -> str | None:
-    try:
-        return (
-            Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
-        )
-    except OSError:
-        return None
-
-
-def _terminate_orphan(pid: int, executable_hint: str) -> bool:
-    cmdline = _process_cmdline(pid)
-    if not cmdline or executable_hint not in cmdline:
+def _terminate_orphan(pid: int, started_at: float | None, executable_hint: str) -> bool:
+    if not is_same_process(pid, started_at, executable_hint):
         return False  # gone, or PID reused by an unrelated process
-    try:
-        os.killpg(pid, signal.SIGTERM)  # provider processes lead their own group
-    except (ProcessLookupError, PermissionError):
-        return False
-    return True
+    return kill_tree(pid)
 
 
 def reconcile(project: Project, run: Run) -> list[str]:
@@ -62,7 +48,7 @@ def reconcile(project: Project, run: Run) -> list[str]:
     exe = Path(project.config.provider.claude_code.executable).name
 
     for execution in store.executions(run.id, status=ExecutionStatus.RUNNING):
-        if execution.pid and _terminate_orphan(execution.pid, exe):
+        if execution.pid and _terminate_orphan(execution.pid, execution.process_started_at, exe):
             notes.append(f"terminated orphaned agent process {execution.pid}")
         store.finish_execution(
             execution.id, status=ExecutionStatus.INTERRUPTED, error="CREW process interrupted"

@@ -33,6 +33,7 @@ from crew.application.project import (
 from crew.domain.enums import GATE_STATES, TERMINAL_STATES, RunState
 from crew.domain.errors import CrewError, NotFoundError
 from crew.persistence.models import Run
+from crew.system.processes import install_termination_handlers
 
 app = typer.Typer(
     name="crew",
@@ -437,6 +438,12 @@ def report(
 
 
 def main() -> None:
+    # Unicode arrows/dashes must not crash output on legacy Windows code pages.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure:
+            reconfigure(errors="replace")
+    install_termination_handlers()
     app()
 
 

@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
-import signal
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +18,7 @@ from pathlib import Path
 from crew.domain.enums import CommandCategory
 from crew.domain.errors import PolicyViolationError
 from crew.security.redaction import redact, redact_args
+from crew.system.processes import spawn_kwargs, terminate_tree
 
 _DESTRUCTIVE_TOKENS = {
     "rm",
@@ -156,28 +156,6 @@ def _truncate(data: bytes, limit: int) -> tuple[str, bool]:
     return data[:limit].decode("utf-8", errors="replace") + "\n…[truncated]", True
 
 
-async def terminate_process_group(proc: asyncio.subprocess.Process, grace: float = 5.0) -> bool:
-    """SIGTERM the process group, then SIGKILL after ``grace`` seconds.
-
-    Returns ``False`` if the process could not be confirmed stopped.
-    """
-    if proc.returncode is not None:
-        return True
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            os.killpg(proc.pid, sig)
-        except ProcessLookupError:
-            return True
-        except PermissionError:
-            proc.kill()
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=grace)
-            return True
-        except TimeoutError:
-            continue
-    return proc.returncode is not None
-
-
 async def run_command(
     argv: list[str],
     *,
@@ -196,18 +174,20 @@ async def run_command(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=env if env is not None else _minimal_env(),
-        start_new_session=True,
+        **spawn_kwargs(),
     )
     timed_out = False
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
     except TimeoutError:
         timed_out = True
-        await terminate_process_group(proc)
+        await terminate_tree(proc)
         out, err = b"", b""
     except asyncio.CancelledError:
-        await terminate_process_group(proc)
+        await terminate_tree(proc)
         raise
+    else:
+        await terminate_tree(proc)  # reap background grandchildren, if any
     stdout, t1 = _truncate(out, output_limit_bytes)
     stderr, t2 = _truncate(err, output_limit_bytes)
     return CommandResult(

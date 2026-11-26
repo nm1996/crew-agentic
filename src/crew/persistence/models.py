@@ -134,6 +134,8 @@ class AgentExecution(Base, JsonMixin):
     cycle: Mapped[int] = mapped_column(Integer, default=0)
     cwd: Mapped[str] = mapped_column(Text)
     pid: Mapped[int | None] = mapped_column(Integer)
+    # Process creation time, so recovery never signals a reused PID.
+    process_started_at: Mapped[float | None] = mapped_column(Float)
     prompt: Mapped[str] = mapped_column(Text, default="")  # redacted
     output_json: Mapped[str | None] = mapped_column(Text)  # validated structured output
     raw_output: Mapped[str | None] = mapped_column(Text)  # redacted, truncated

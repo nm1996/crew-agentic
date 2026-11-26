@@ -98,7 +98,9 @@ class AgentRuntime:
             result = await self.provider.execute(
                 request,
                 timeout_seconds=self.config.provider.claude_code.timeout_seconds,
-                on_process_start=lambda pid: self.store.set_execution_pid(execution_id, pid),
+                on_process_start=lambda pid, started: self.store.set_execution_pid(
+                    execution_id, pid, started
+                ),
             )
         except asyncio.CancelledError:
             self.store.finish_execution(execution_id, status=ExecutionStatus.CANCELLED)

@@ -4,11 +4,11 @@ Process tests use a stand-in executable, so no real CLI or credentials are neede
 """
 
 import json
-import os
 import stat
 import sys
 from pathlib import Path
 
+import psutil
 import pytest
 
 from crew.agents.contracts import output_schema
@@ -137,7 +137,9 @@ async def test_execute_feeds_prompt_on_stdin_and_parses(tmp_path):
     provider = ClaudeCodeProvider(ClaudeCodeSettings(executable=exe))
     pids = []
     result = await provider.execute(
-        make_request(Role.DIRECTOR, tmp_path), timeout_seconds=30, on_process_start=pids.append
+        make_request(Role.DIRECTOR, tmp_path),
+        timeout_seconds=30,
+        on_process_start=lambda pid, _started: pids.append(pid),
     )
     assert result.output["echo"] == "do the thing"
     assert pids and pids[0] > 0
@@ -149,11 +151,12 @@ async def test_execute_timeout_kills_process(tmp_path):
     pids = []
     with pytest.raises(ProviderError) as info:
         await provider.execute(
-            make_request(Role.DIRECTOR, tmp_path), timeout_seconds=1, on_process_start=pids.append
+            make_request(Role.DIRECTOR, tmp_path),
+            timeout_seconds=1,
+            on_process_start=lambda pid, _started: pids.append(pid),
         )
     assert info.value.kind == "timeout"
-    with pytest.raises(ProcessLookupError):
-        os.kill(pids[0], 0)
+    assert not psutil.pid_exists(pids[0]) or psutil.Process(pids[0]).status() == "zombie"
 
 
 async def test_execute_nonzero_exit_without_output(tmp_path):

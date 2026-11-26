@@ -1,42 +1,29 @@
 """Per-run driver lock.
 
-Exactly one CREW process may drive a run at a time. ``flock`` is released by the
-kernel when the holder dies, so a killed process never leaves a stale lock.
+Exactly one CREW process may drive a run at a time. The underlying OS lock is
+released by the kernel when the holder dies, so a killed process never leaves
+a stale lock (see :mod:`crew.system.locking`).
 """
 
 from __future__ import annotations
 
-import fcntl
-import os
 from pathlib import Path
 from types import TracebackType
 
 from crew.domain.errors import RunLockedError
+from crew.system.locking import FileLock
 
 
 class RunLock:
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._fd: int | None = None
+        self._lock = FileLock(path)
 
     def try_acquire(self) -> bool:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            os.close(fd)
-            return False
-        os.ftruncate(fd, 0)
-        os.write(fd, str(os.getpid()).encode())
-        self._fd = fd
-        return True
+        return self._lock.try_acquire()
 
     def release(self) -> None:
-        if self._fd is not None:
-            fcntl.flock(self._fd, fcntl.LOCK_UN)
-            os.close(self._fd)
-            self._fd = None
+        self._lock.release()
 
     def __enter__(self) -> RunLock:
         if not self.try_acquire():

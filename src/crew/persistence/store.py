@@ -311,11 +311,12 @@ class Store:
             s.add(execution)
         return execution
 
-    def set_execution_pid(self, execution_id: str, pid: int) -> None:
+    def set_execution_pid(self, execution_id: str, pid: int, started_at: float | None) -> None:
         with self.session() as s:
             row = s.get(AgentExecution, execution_id)
-            assert row is not None
-            row.pid = pid
+            if row is not None:
+                row.pid = pid
+                row.process_started_at = started_at
 
     def finish_execution(self, execution_id: str, **fields: Any) -> None:
         with self.session() as s:

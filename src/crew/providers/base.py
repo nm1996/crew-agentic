@@ -46,7 +46,8 @@ class AgentResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-ProcessStarted = Callable[[int], None]
+# Called with (pid, process creation time) right after the provider process starts.
+ProcessStarted = Callable[[int, float | None], None]
 
 
 class AgentProvider(Protocol):
