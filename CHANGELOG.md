@@ -15,7 +15,6 @@ Cost controls and robustness, driven by a measured reference run (Spring Boot CR
 - Measured reference example: Spring Boot CRUD service (`docs/examples/`).
 - M9 roadmap: permission prompts and integration adapters (Jira, code host, review,
   Confluence).
-
 - Cost profiles (`provider.claude_code.profile: default|balanced|economy`), per-role model
   and `--effort` overrides (`provider.claude_code.roles`), and
   `execution.review_context: summary`. Measured on the reference run: default $3.34,
