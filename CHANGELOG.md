@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-26
+
+Cost controls and robustness, driven by a measured reference run (Spring Boot CRUD).
+
 ### Added
 - Token usage, turns and model per agent execution; "Agent usage" table in reports.
 - Measured reference example: Spring Boot CRUD service (`docs/examples/`).

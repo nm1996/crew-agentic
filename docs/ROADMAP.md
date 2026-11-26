@@ -98,10 +98,11 @@ How they fit the workflow:
 [Spring Boot CRUD](examples/spring-boot-crud.md): COMPLETED in 14 min for $3.34, 69
 integration tests, 25/25 independent API checks. Findings that feed back into CREW:
 
-- **Per-role models** (`provider.claude_code.models: {evaluator: …}`): Reviewer and
-  Evaluator are a third of the cost for a tenth of the time.
-- **Compact review payload:** pass a diff summary and let read-only agents open files
-  with their Read tool instead of embedding the whole diff (~55 k input tokens each).
+- **Per-role models and cost profiles** — done in 0.4.0 (D21): economy $1.28, balanced
+  $2.87 for the same, equally working service.
+- **Compact review context** — done in 0.4.0 (`execution.review_context: summary`).
+- **Merge-conflict resolution and usage-limit handling** — done in 0.4.0 (D22), found by
+  the balanced runs.
 - **Optional runtime check:** a configurable "start and probe" verification step (e.g.
   start the service, wait for a port, run a probe command), so the Evaluator does not
   have to mark startup as unverifiable.
