@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Token usage, turns and model per agent execution; "Agent usage" table in reports.
+- Measured reference example: Spring Boot CRUD service (`docs/examples/`).
+- M9 roadmap: permission prompts and integration adapters (Jira, code host, review,
+  Confluence).
+
+### Fixed
+- Run ids were truncated in `crew history` in narrow terminals.
+
 ## [0.3.0] - 2026-11-26
 
 ### Added

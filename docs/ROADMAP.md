@@ -93,11 +93,19 @@ How they fit the workflow:
   adapters, only on explicit commands or configured completion hooks, and is recorded as
   an event. "Never push automatically" stays true.
 
-### 3. Measured reference example
+### 3. Measured reference example — done
 
-A real run building a small Spring Boot CRUD service (User, Product, Order, Cart; H2),
-with cost, duration and agent counts, documented in `docs/examples/` and used to tune
-defaults (see [examples](examples/README.md)).
+[Spring Boot CRUD](examples/spring-boot-crud.md): COMPLETED in 14 min for $3.34, 69
+integration tests, 25/25 independent API checks. Findings that feed back into CREW:
+
+- **Per-role models** (`provider.claude_code.models: {evaluator: …}`): Reviewer and
+  Evaluator are a third of the cost for a tenth of the time.
+- **Compact review payload:** pass a diff summary and let read-only agents open files
+  with their Read tool instead of embedding the whole diff (~55 k input tokens each).
+- **Optional runtime check:** a configurable "start and probe" verification step (e.g.
+  start the service, wait for a port, run a probe command), so the Evaluator does not
+  have to mark startup as unverifiable.
+- Fixed during the run: run ids were truncated in `crew history` (0.3.1).
 
 ## M10 — Candidates
 
