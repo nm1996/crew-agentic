@@ -98,3 +98,21 @@ def test_history_never_truncates_run_ids(in_repo, monkeypatch):
     invoke("init", "--provider", "fake")
     run_id = run_id_from(invoke("run", "a fairly long request " * 5).output)
     assert run_id in invoke("history").output
+
+
+def test_request_from_a_file(in_repo):
+    invoke("init", "--provider", "fake")
+    spec = in_repo.parent / "request.md"
+    spec.write_text("# Checkout\n\nAdd a checkout endpoint that creates an order from a cart.\n")
+    result = invoke("run", "--file", str(spec), "keep it small")
+    assert result.exit_code == 0, result.output
+    run_id = run_id_from(result.output)
+    shown = json.loads(invoke("show", run_id, "--json").output)
+    assert shown["request"].startswith("# Checkout")
+    assert "Additional instructions:\nkeep it small" in shown["request"]
+
+
+def test_missing_request_file_is_a_clear_error(in_repo):
+    invoke("init", "--provider", "fake")
+    result = invoke("run", "--file", "nope.md")
+    assert result.exit_code == 3 and "not found" in result.output

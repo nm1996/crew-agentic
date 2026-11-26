@@ -241,6 +241,10 @@ def run(
     request: Annotated[
         str | None, typer.Argument(help="What you want done, in plain language.")
     ] = None,
+    file: Annotated[
+        Path | None,
+        typer.Option("--file", "-f", help="Read the request from a Markdown/text file."),
+    ] = None,
     issue: Annotated[
         str | None, typer.Option("--issue", help="Use this issue (e.g. PROJ-123) as the request.")
     ] = None,
@@ -256,7 +260,12 @@ def run(
     """Start a run: analyse, plan, and stop at the plan-approval gate."""
     project = open_project()
     sources = gather_sources(
-        project, request, issue_key=issue, doc_refs=doc, pr_comments=pr_comments
+        project,
+        request,
+        request_file=file,
+        issue_key=issue,
+        doc_refs=doc,
+        pr_comments=pr_comments,
     )
     if sources.issue_key:
         console.print(f"Request from {sources.issue_key}:", style="dim")

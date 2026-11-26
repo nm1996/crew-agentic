@@ -15,19 +15,38 @@ from crew.workspace.git import Git
 
 __all__ = ["SECRET_GLOBS", "ProjectContext", "collect_context", "is_excluded"]
 
+# Files that describe how a project is built and organised, in priority order.
+# Excerpts go into the Director's context; it can open anything else itself.
 KEY_FILES = (
+    # Agent and project guidance
     "README.md",
     "README.rst",
     "CLAUDE.md",
     "AGENTS.md",
     "CONTRIBUTING.md",
+    # Build definitions
     "pyproject.toml",
+    "setup.cfg",
+    "requirements.txt",
     "package.json",
+    "tsconfig.json",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "settings.gradle",
+    "settings.gradle.kts",
     "Cargo.toml",
     "go.mod",
+    "Gemfile",
+    "composer.json",
     "Makefile",
+    # Runtime
+    "Dockerfile",
+    "docker-compose.yml",
+    "compose.yaml",
 )
 KEY_FILE_MAX_CHARS = 6_000
+KEY_FILES_TOTAL_MAX_CHARS = 40_000  # keeps the Director prompt bounded in large repos
 PROJECT_NOTES_MAX_CHARS = 10_000
 
 
@@ -62,11 +81,15 @@ def collect_context(
     git = Git(workspace)
     tracked = [f for f in git.ls_files() if not is_excluded(f, exclude)]
     key_files: dict[str, str] = {}
+    budget = KEY_FILES_TOTAL_MAX_CHARS
     for name in KEY_FILES:
         candidate = workspace / name
-        if candidate.is_file():
-            text = candidate.read_text(encoding="utf-8", errors="replace")
-            key_files[name] = text[:KEY_FILE_MAX_CHARS]
+        if budget <= 0 or not candidate.is_file() or is_excluded(name, exclude):
+            continue
+        text = candidate.read_text(encoding="utf-8", errors="replace")
+        excerpt = text[: min(KEY_FILE_MAX_CHARS, budget)]
+        key_files[name] = excerpt
+        budget -= len(excerpt)
     commits = git.run("log", "--oneline", "-n", "15", check=False)
     notes = []
     if notes_dir.is_dir():
