@@ -11,6 +11,8 @@ from crew.domain.errors import PlanValidationError
 
 # Task ids become part of Git branch names, so keep them ref-safe.
 TASK_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+# Ids CREW generates itself (correction tasks) start with this; plans may not use it.
+RESERVED_PREFIX = "crew-"
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,8 @@ def validate_graph(nodes: Sequence[Node]) -> list[str]:
             problems.append(
                 f"task id {node_id!r} must match {TASK_ID_RE.pattern} (lowercase, ref-safe)"
             )
+        if node_id.startswith(RESERVED_PREFIX):
+            problems.append(f"task id {node_id!r} uses the reserved prefix {RESERVED_PREFIX!r}")
         if node_id in seen:
             problems.append(f"duplicate task id {node_id!r}")
         seen.add(node_id)

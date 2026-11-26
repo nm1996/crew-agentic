@@ -224,9 +224,9 @@ def test_blocking_review_triggers_one_correction_cycle(make_orch):
     run = orch.approve_plan(orch.start_run("x").id)
     assert run.state == RunState.AWAITING_FINAL_APPROVAL
     assert run.correction_cycle == 1
-    fix = orch.store.get_task(run.id, "fix-1")
+    fix = orch.store.get_task(run.id, "crew-fix-1")
     assert fix.status == TaskStatus.COMPLETED and fix.integrated
-    implementer_prompts = [c.prompt for c in fake.calls if c.task_key == "fix-1"]
+    implementer_prompts = [c.prompt for c in fake.calls if c.task_key == "crew-fix-1"]
     assert "Missing edge case" in implementer_prompts[0]
     # Second review saw the first review's findings.
     reviewer_prompts = [c.prompt for c in fake.calls if c.role is Role.REVIEWER]
@@ -473,3 +473,28 @@ def test_git_commands_are_recorded_per_run(make_orch):
     git_cmds = orch.store.commands(run.id, purpose="git")
     assert git_cmds
     assert any('"merge"' in c.argv_json for c in git_cmds)
+
+
+def test_reviewer_and_evaluator_cannot_dirty_the_integration_worktree(make_orch):
+    def messy_reviewer(req: AgentRequest) -> dict:
+        (req.cwd / "review-cache.txt").write_text("tool output")  # e.g. a test cache
+        return {"assessment": "looks fine", "findings": []}
+
+    fake = FakeProvider().on(Role.REVIEWER, messy_reviewer)
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL
+    integration = orch.p.workspace.integration_path(run.id)
+    assert not (integration / "review-cache.txt").exists()
+    reviewer_cwd = next(c.cwd for c in fake.calls if c.role is Role.REVIEWER)
+    assert reviewer_cwd != integration
+
+
+def test_worktrees_removed_on_failure_when_not_preserving(make_orch, configure_project):
+    project = configure_project(execution={"preserve_worktrees_on_failure": False})
+    fake = FakeProvider().on(Role.IMPLEMENTER, lambda _r: {"summary": ""})  # always invalid
+    orch = make_orch(project, fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.FAILED
+    leftovers = [p for p in orch.p.workspace.run_dir(run.id).iterdir() if p.is_dir()]
+    assert leftovers == []  # all were clean, so all were removed

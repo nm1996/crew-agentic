@@ -73,6 +73,19 @@ class WorkspaceManager:
             self.git.worktree_add_detached(path, base_commit)
         return path
 
+    def ensure_snapshot_worktree(self, run_id: str, purpose: str, commit: str) -> Path:
+        """Detached, disposable worktree at ``commit`` for read-only agents.
+
+        Reviewer and Evaluator run here rather than in the integration worktree,
+        so anything they (or tools they run) write can never leak into the next
+        integration merge.
+        """
+        path = self.run_dir(run_id) / f"{purpose}-{commit[:10]}"
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self.git.worktree_add_detached(path, commit)
+        return path
+
     def ensure_integration_worktree(self, run_id: str, base_commit: str) -> Path:
         path = self.integration_path(run_id)
         branch = self.integration_branch(run_id)

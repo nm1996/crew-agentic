@@ -42,7 +42,14 @@ from crew.domain.errors import (
     PlanValidationError,
     PreconditionError,
 )
-from crew.domain.task_graph import Node, is_blocked, is_ready, topological_order, validate_graph
+from crew.domain.task_graph import (
+    RESERVED_PREFIX,
+    Node,
+    is_blocked,
+    is_ready,
+    topological_order,
+    validate_graph,
+)
 from crew.orchestrator import recovery
 from crew.orchestrator.lock import RunLock
 from crew.orchestrator.state_machine import is_terminal
@@ -515,6 +522,10 @@ class Orchestrator:
         if not path.exists():
             ws.ensure_integration_worktree(run.id, run.base_commit)
         igit = self.p.git.at(path)
+        if not igit.status().is_clean:
+            raise CrewError(
+                f"integration worktree {path} has uncommitted changes; refusing to merge into it"
+            )
         tasks = {t.key: t for t in self.store.tasks(run.id, cycle=run.correction_cycle)}
         order = topological_order(
             {k: [d for d in t.dependencies if d in tasks] for k, t in tasks.items()}
@@ -577,11 +588,20 @@ class Orchestrator:
         return self.p.git.diff(run.base_commit, self.p.workspace.integration_branch(run.id))
 
     def _cycle_commands(self, run: Run) -> list:
-        return [
-            c
-            for c in self.store.commands(run.id, purpose="verification")
-            if c.cycle == run.correction_cycle
-        ]
+        """Latest result per verification command in the current cycle.
+
+        A stage re-run after a crash records commands again; only the newest
+        result for each command is evidence.
+        """
+        latest: dict[str, Any] = {}
+        for c in self.store.commands(run.id, purpose="verification"):
+            if c.cycle == run.correction_cycle:
+                latest[c.argv_json] = c
+        return list(latest.values())
+
+    def _snapshot(self, run: Run, purpose: str) -> Any:
+        tip = self.p.git.rev_parse(self.p.workspace.integration_branch(run.id))
+        return self.p.workspace.ensure_snapshot_worktree(run.id, purpose, tip)
 
     def _review(self, run: Run) -> None:
         self.notify("Reviewer is inspecting the integrated diff…")
@@ -600,7 +620,7 @@ class Orchestrator:
                 self._cycle_commands(run),
                 previous,
             ),
-            self.p.workspace.integration_path(run.id),
+            self._snapshot(run, "review"),
         )
         review = _expect(review, ReviewReport)
         self._write_review_artifact(run)
@@ -625,7 +645,7 @@ class Orchestrator:
         blocking = [f for f in review.get("findings", []) if f.get("blocking")]
         cycle = run.correction_cycle + 1
         task = Task(
-            key=f"fix-{cycle}",
+            key=f"{RESERVED_PREFIX}fix-{cycle}",
             kind=TaskKind.CORRECTION,
             cycle=cycle,
             seq=0,
@@ -666,7 +686,7 @@ class Orchestrator:
                 self._cycle_commands(run),
                 reviews,
             ),
-            self.p.workspace.integration_path(run.id),
+            self._snapshot(run, "evaluate"),
         )
         evaluation = _expect(evaluation, EvaluationReport)
         renderer.write_artifact(
@@ -718,6 +738,7 @@ class Orchestrator:
 
     def _fail(self, run_id: str, reason: str) -> None:
         self._transition(run_id, RunState.FAILED, reason, failure_reason=reason)
+        self._cleanup_after_failure(run_id)
 
     def _cancel(self, run_id: str) -> None:
         self._transition(
@@ -726,6 +747,12 @@ class Orchestrator:
             "cancelled by developer",
             failure_reason="cancelled by developer",
         )
+        self._cleanup_after_failure(run_id)
+
+    def _cleanup_after_failure(self, run_id: str) -> None:
+        # Even when not preserving, only worktrees without uncommitted work are removed.
+        if not self.config.execution.preserve_worktrees_on_failure:
+            self._cleanup_clean_worktrees(run_id)
 
     def _require_state(self, run_id: str, state: RunState) -> Run:
         run = self.store.get_run(run_id)

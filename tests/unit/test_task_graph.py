@@ -37,3 +37,8 @@ def test_blocked_when_a_dependency_failed():
     statuses = {"a": TaskStatus.FAILED, "b": TaskStatus.COMPLETED}
     assert is_blocked(["a"], statuses)
     assert not is_blocked(["b"], statuses)
+
+
+def test_reserved_prefix_is_rejected():
+    with pytest.raises(PlanValidationError, match="reserved prefix"):
+        validate_graph([Node("crew-fix-1", ())])
