@@ -393,3 +393,56 @@ def test_second_driver_is_locked_out(make_orch):
         assert orch.store.get_run(run.id).cancel_requested
     finally:
         lock.release()
+
+
+def test_cancel_requested_during_planning_does_not_survive_the_gate(make_orch):
+    holder = {}
+
+    def director(req: AgentRequest) -> dict:
+        holder["orch"].store.request_cancel(req.run_id)  # `crew stop` while planning
+        return default_director(req)
+
+    orch = make_orch(provider=FakeProvider().on(Role.DIRECTOR, director))
+    holder["orch"] = orch
+    run = orch.start_run("x")
+    assert run.state == RunState.CANCELLED  # honoured now, not after a later approval
+
+
+def test_cancellation_interrupts_a_running_reviewer(make_orch):
+    holder = {}
+
+    async def reviewer(req: AgentRequest) -> dict:
+        holder["orch"].store.request_cancel(req.run_id)
+        await asyncio.sleep(10)
+        return {"assessment": "never returned", "findings": []}
+
+    orch = make_orch(provider=FakeProvider().on(Role.REVIEWER, reviewer))
+    holder["orch"] = orch
+    started = time.monotonic()
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert time.monotonic() - started < 6
+    assert run.state == RunState.CANCELLED
+    reviewer_exec = orch.store.executions(run.id, role=Role.REVIEWER)[0]
+    assert reviewer_exec.status == ExecutionStatus.CANCELLED
+
+
+def test_stop_after_driver_died_reconciles_leftovers(make_orch):
+    orch = make_orch()
+    run = orch.approve_plan(orch.start_run("x").id, proceed=False)
+    task = orch.store.get_task(run.id, "part-a")
+    claimed = orch.store.claim_task(task, "dead-exec")
+    orch.store.start_execution(
+        run_id=run.id,
+        role=Role.IMPLEMENTER,
+        provider="fake",
+        cwd="/nowhere",
+        prompt="",
+        cycle=0,
+        task=claimed,
+        execution_id="dead-exec",
+    )
+    run, immediate = orch.stop(run.id)
+    assert immediate and run.state == RunState.CANCELLED
+    dead = next(e for e in orch.store.executions(run.id) if e.id == "dead-exec")
+    assert dead.status == ExecutionStatus.INTERRUPTED
+    assert orch.store.get_task(run.id, "part-a").status == TaskStatus.CANCELLED

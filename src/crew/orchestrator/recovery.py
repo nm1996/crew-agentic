@@ -42,11 +42,11 @@ def _terminate_orphan(pid: int, started_at: float | None, executable_hint: str) 
     return kill_tree(pid)
 
 
-def reconcile(project: Project, run: Run) -> list[str]:
-    store, git, ws = project.store, project.git, project.workspace
+def reconcile_processes(project: Project, run: Run) -> list[str]:
+    """Mark executions left RUNNING as INTERRUPTED and stop orphaned agent trees."""
+    store = project.store
     notes: list[str] = []
-    exe = Path(project.config.provider.claude_code.executable).name
-
+    exe = Path(project.config.provider.claude_code.executable).stem
     for execution in store.executions(run.id, status=ExecutionStatus.RUNNING):
         if execution.pid and _terminate_orphan(execution.pid, execution.process_started_at, exe):
             notes.append(f"terminated orphaned agent process {execution.pid}")
@@ -54,6 +54,12 @@ def reconcile(project: Project, run: Run) -> list[str]:
             execution.id, status=ExecutionStatus.INTERRUPTED, error="CREW process interrupted"
         )
         notes.append(f"execution {execution.id} ({execution.role}) marked INTERRUPTED")
+    return notes
+
+
+def reconcile(project: Project, run: Run) -> list[str]:
+    store, git, ws = project.store, project.git, project.workspace
+    notes = reconcile_processes(project, run)
 
     if not git.ok("cat-file", "-e", f"{run.base_commit}^{{commit}}"):
         raise PreconditionError(

@@ -12,11 +12,12 @@ Concurrency is limited to the IMPLEMENTING stage, where up to
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from crew.agents import payloads
 from crew.agents.contracts import DirectorPlan, EvaluationReport, ImplementationReport, ReviewReport
@@ -55,6 +56,10 @@ from crew.workspace.worktrees import WorkspaceManager
 log = logging.getLogger(__name__)
 
 Notify = Callable[[str], None]
+T = TypeVar("T")
+
+# How often running stages check for a developer cancellation request.
+CANCEL_POLL_SECONDS = 0.5
 
 
 class RunCancelled(Exception):
@@ -171,6 +176,12 @@ class Orchestrator:
         lock = RunLock(self._lock_path(run_id))
         if lock.try_acquire():
             try:
+                # No driver is alive, but a killed one may have left agent processes behind.
+                for note in recovery.reconcile_processes(self.p, run):
+                    self.notify(f"[recovery] {note}")
+                for task in self.store.tasks(run_id):
+                    if task.status in (TaskStatus.RUNNING, TaskStatus.PENDING, TaskStatus.READY):
+                        self.store.set_task_status(task, TaskStatus.CANCELLED, "run cancelled")
                 self._transition(
                     run_id,
                     RunState.CANCELLED,
@@ -212,11 +223,15 @@ class Orchestrator:
         while True:
             run = self.store.get_run(run_id)
             state = RunState(run.state)
-            if is_terminal(state) or state in GATE_STATES:
+            if is_terminal(state):
                 return self._finish(run_id)
+            # Checked before the gate test: a cancel requested while a stage was
+            # running must not survive the gate and fire after a later approval.
             if run.cancel_requested:
                 self._cancel(run_id)
                 continue
+            if state in GATE_STATES:
+                return self._finish(run_id)
             handler = self._handlers[state]
             try:
                 handler(run)
@@ -374,7 +389,9 @@ class Orchestrator:
                 if not running:
                     return
                 await asyncio.wait(
-                    running.values(), timeout=0.5, return_when=asyncio.FIRST_COMPLETED
+                    running.values(),
+                    timeout=CANCEL_POLL_SECONDS,
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
                 for key in [k for k, t in running.items() if t.done()]:
                     finished = running.pop(key)
@@ -490,7 +507,7 @@ class Orchestrator:
             self.store.update_task(task.pk, integrated=True)
             self.store.add_event(run.id, "task_integrated", task.branch, task_key=task.key)
         self.notify("Integration complete; running verification commands…")
-        asyncio.run(self._verify(run, path))
+        self._run_cancellable(run.id, self._verify(run, path))
         renderer.write_artifact(
             self.store,
             self._run_dir(run),
@@ -640,11 +657,29 @@ class Orchestrator:
     # ======================================================================
 
     def _invoke(self, role: Role, run: Run, prompt: str, cwd: Any) -> Any:
-        return asyncio.run(
+        return self._run_cancellable(
+            run.id,
             self.runtime.invoke(
                 role, run_id=run.id, prompt=prompt, cwd=cwd, cycle=run.correction_cycle
-            )
+            ),
         )
+
+    def _run_cancellable(self, run_id: str, coro: Coroutine[Any, Any, T]) -> T:
+        """Run ``coro`` to completion, cancelling it if the developer stops the run."""
+
+        async def watch() -> T:
+            task = asyncio.ensure_future(coro)
+            while True:
+                done, _ = await asyncio.wait({task}, timeout=CANCEL_POLL_SECONDS)
+                if done:
+                    return task.result()
+                if self.store.is_cancel_requested(run_id):
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
+                    raise RunCancelled
+
+        return asyncio.run(watch())
 
     def _transition(self, run_id: str, to: RunState, message: str = "", **fields: Any) -> Run:
         run = self.store.transition(run_id, to, message=message, **fields)
