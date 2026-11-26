@@ -4,7 +4,6 @@ Process tests use a stand-in executable, so no real CLI or credentials are neede
 """
 
 import json
-import stat
 import sys
 from pathlib import Path
 
@@ -18,7 +17,11 @@ from crew.config.schema import ClaudeCodeSettings
 from crew.domain.enums import Role
 from crew.domain.errors import ProviderError
 from crew.providers.base import AgentRequest
-from crew.providers.claude_code.adapter import ClaudeCodeProvider, build_argv
+from crew.providers.claude_code.adapter import (
+    ClaudeCodeProvider,
+    build_argv,
+    resolve_cli_command,
+)
 from crew.providers.claude_code.parser import extract_json_object, parse_cli_output
 
 CONFIG = parse_config(
@@ -120,22 +123,24 @@ def test_extract_json_object_from_prose():
     assert extract_json_object('blah {"x": [1, 2]} blah') == {"x": [1, 2]}
 
 
-def _stub_cli(tmp_path: Path, body: str) -> str:
-    script = tmp_path / "claude-stub"
-    script.write_text(f"#!{sys.executable}\n{body}\n")
-    script.chmod(script.stat().st_mode | stat.S_IEXEC)
-    return str(script)
+def _stub_provider(tmp_path: Path, body: str, monkeypatch) -> ClaudeCodeProvider:
+    """A provider whose CLI is a Python script: portable across Linux, macOS and Windows."""
+    script = tmp_path / "claude_stub.py"
+    script.write_text(body)
+    provider = ClaudeCodeProvider(ClaudeCodeSettings())
+    monkeypatch.setattr(provider, "resolve_command", lambda: [sys.executable, str(script)])
+    return provider
 
 
-async def test_execute_feeds_prompt_on_stdin_and_parses(tmp_path):
-    exe = _stub_cli(
+async def test_execute_feeds_prompt_on_stdin_and_parses(tmp_path, monkeypatch):
+    provider = _stub_provider(
         tmp_path,
         "import sys, json\n"
         "prompt = sys.stdin.read()\n"
         "print(json.dumps({'subtype': 'success', 'result': '',"
         " 'structured_output': {'echo': prompt, 'argc': len(sys.argv)}}))",
+        monkeypatch,
     )
-    provider = ClaudeCodeProvider(ClaudeCodeSettings(executable=exe))
     pids = []
     result = await provider.execute(
         make_request(Role.DIRECTOR, tmp_path),
@@ -146,9 +151,8 @@ async def test_execute_feeds_prompt_on_stdin_and_parses(tmp_path):
     assert pids and pids[0] > 0
 
 
-async def test_execute_timeout_kills_process(tmp_path):
-    exe = _stub_cli(tmp_path, "import time\ntime.sleep(60)")
-    provider = ClaudeCodeProvider(ClaudeCodeSettings(executable=exe))
+async def test_execute_timeout_kills_process(tmp_path, monkeypatch):
+    provider = _stub_provider(tmp_path, "import time\ntime.sleep(60)", monkeypatch)
     pids = []
     with pytest.raises(ProviderError) as info:
         await provider.execute(
@@ -160,12 +164,31 @@ async def test_execute_timeout_kills_process(tmp_path):
     assert not psutil.pid_exists(pids[0]) or psutil.Process(pids[0]).status() == "zombie"
 
 
-async def test_execute_nonzero_exit_without_output(tmp_path):
-    exe = _stub_cli(tmp_path, "import sys\nsys.stderr.write('auth required')\nsys.exit(1)")
-    provider = ClaudeCodeProvider(ClaudeCodeSettings(executable=exe))
+async def test_execute_nonzero_exit_without_output(tmp_path, monkeypatch):
+    provider = _stub_provider(
+        tmp_path, "import sys\nsys.stderr.write('auth required')\nsys.exit(1)", monkeypatch
+    )
     with pytest.raises(ProviderError, match="auth required") as info:
         await provider.execute(make_request(Role.DIRECTOR, tmp_path), timeout_seconds=10)
     assert info.value.kind == "process_error"
+
+
+def test_npm_cmd_shim_is_resolved_to_node(tmp_path, monkeypatch):
+    shim = tmp_path / "claude.cmd"
+    shim.write_text("@echo off")
+    cli_js = tmp_path / "node_modules" / "@anthropic-ai" / "claude-code" / "cli.js"
+    cli_js.parent.mkdir(parents=True)
+    cli_js.write_text("")
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/node" if name == "node" else None)
+    assert resolve_cli_command(str(shim)) == ["/usr/bin/node", str(cli_js)]
+
+
+def test_unresolvable_script_shim_is_refused(tmp_path):
+    shim = tmp_path / "claude.CMD"
+    shim.write_text("@echo off")
+    with pytest.raises(ProviderError, match="shim"):
+        resolve_cli_command(str(shim))
+    assert resolve_cli_command("/usr/local/bin/claude") == ["/usr/local/bin/claude"]
 
 
 def test_missing_executable_has_actionable_error(tmp_path):

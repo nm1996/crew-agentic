@@ -6,6 +6,7 @@ These map to the MVP acceptance criteria in docs/PRODUCT_SPEC.md §7.
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 from pathlib import Path
 
@@ -258,7 +259,8 @@ def test_evaluator_receives_request_plan_diff_and_labelled_claims(make_orch, fak
 
 
 def test_verification_commands_are_recorded_as_evidence(make_orch, configure_project):
-    project = configure_project(execution={"verification_commands": ["ls crew_fake"]})
+    listing = [sys.executable, "-c", "import os; print(sorted(os.listdir('crew_fake')))"]
+    project = configure_project(execution={"verification_commands": [listing]})
     fake = FakeProvider()
     orch = make_orch(project, fake)
     run = orch.approve_plan(orch.start_run("x").id)
@@ -266,7 +268,7 @@ def test_verification_commands_are_recorded_as_evidence(make_orch, configure_pro
     assert len(commands) == 1 and commands[0].exit_code == 0
     assert "part-a.md" in commands[0].stdout
     reviewer_prompt = next(c.prompt for c in fake.calls if c.role is Role.REVIEWER)
-    assert "`ls crew_fake` — exit 0" in reviewer_prompt
+    assert "— exit 0" in reviewer_prompt and "part-a.md" in reviewer_prompt
 
 
 # ---- failures, conflicts (AC 12) --------------------------------------------

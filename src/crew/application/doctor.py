@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -12,8 +13,9 @@ from pathlib import Path
 
 from crew.config.loader import CREW_DIR, ProjectPaths, load_config
 from crew.config.schema import CrewConfig
-from crew.domain.errors import CrewError
+from crew.domain.errors import CrewError, ProviderError
 from crew.persistence.database import schema_status
+from crew.providers.claude_code.adapter import resolve_cli_command
 from crew.workspace.git import Git
 
 MIN_PYTHON = (3, 12)
@@ -166,14 +168,18 @@ def check_claude(config: CrewConfig | None) -> list[Check]:
                 "once to log in. Or set provider.default=fake to try CREW offline.",
             )
         ]
-    version = _run([path, "--version"])
+    try:
+        command = resolve_cli_command(path)
+    except ProviderError as exc:
+        return [Check("Claude Code CLI", miss, exc.message, exc.hint or "")]
+    version = _run([*command, "--version"])
     checks = [
         Check(
             "Claude Code CLI", Level.OK, f"{path} ({(version.stdout.strip() if version else '?')})"
         )
     ]
 
-    help_proc = _run([path, "--help"])
+    help_proc = _run([*command, "--help"])
     help_text = help_proc.stdout if help_proc else ""
     flags = list(REQUIRED_CLAUDE_FLAGS)
     missing = [f for f in flags if f not in help_text]
@@ -208,8 +214,22 @@ def check_claude(config: CrewConfig | None) -> list[Check]:
     return checks
 
 
+def check_platform(cwd: Path) -> Check:
+    detail = f"{platform.system()} {platform.release()} ({platform.machine()})"
+    resolved = str(cwd.resolve())
+    if "onedrive" in resolved.casefold() or resolved.startswith("\\\\"):
+        return Check(
+            "Platform",
+            Level.WARN,
+            detail,
+            "The project is on a synced/network folder; SQLite and git worktrees are unreliable "
+            "there. Move it to a local disk.",
+        )
+    return Check("Platform", Level.OK, detail)
+
+
 def run_doctor(cwd: Path) -> list[Check]:
-    checks = [check_python(), check_git()]
+    checks = [check_platform(cwd), check_python(), check_git()]
     if checks[-1].level is Level.FAIL:
         return checks
     checks += check_repository(cwd)

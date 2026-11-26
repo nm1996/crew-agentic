@@ -30,6 +30,7 @@ import json
 import os
 import shutil
 import time
+from pathlib import Path
 
 from crew.config.schema import ClaudeCodeSettings
 from crew.domain.errors import ProviderError
@@ -43,7 +44,9 @@ EDIT_TOOLS = ("Edit", "Write")
 MAX_CAPTURE_BYTES = 5_000_000
 
 
-def build_argv(settings: ClaudeCodeSettings, request: AgentRequest, executable: str) -> list[str]:
+def build_argv(
+    settings: ClaudeCodeSettings, request: AgentRequest, command: str | list[str]
+) -> list[str]:
     """Build the CLI argument list.
 
     Security-relevant flags come first and free text (JSON schema, role prompt)
@@ -57,10 +60,12 @@ def build_argv(settings: ClaudeCodeSettings, request: AgentRequest, executable: 
         tools += EDIT_TOOLS
         allowed += EDIT_TOOLS
     if caps.bash_rules:
-        tools.append("Bash")
+        for tool in ("Bash", "PowerShell"):
+            if any(rule.startswith(f"{tool}(") for rule in caps.bash_rules):
+                tools.append(tool)
         allowed += caps.bash_rules
     argv = [
-        executable,
+        *([command] if isinstance(command, str) else command),
         "-p",
         "--restricted",  # confine file tools, ignore user/project settings, refuse bypass
         "--strict-mcp-config",  # no MCP servers from the developer's configuration
@@ -91,6 +96,24 @@ def build_argv(settings: ClaudeCodeSettings, request: AgentRequest, executable: 
     return argv
 
 
+_NPM_CLI_JS = Path("node_modules") / "@anthropic-ai" / "claude-code" / "cli.js"
+
+
+def resolve_cli_command(executable: str) -> list[str]:
+    if not executable.casefold().endswith((".cmd", ".bat", ".ps1")):
+        return [executable]
+    cli_js = Path(executable).parent / _NPM_CLI_JS
+    node = shutil.which("node")
+    if cli_js.is_file() and node:
+        return [node, str(cli_js)]
+    raise ProviderError(
+        f"{executable} is a script shim that cannot be invoked safely",
+        kind="not_installed",
+        hint="Install the native Claude Code build (claude.exe), or make sure `node` is on "
+        "PATH next to the npm package, then run `crew doctor`.",
+    )
+
+
 def _child_env() -> dict[str, str]:
     # Claude Code needs its own auth/config variables; drop obvious unrelated secrets.
     drop_prefixes = ("AWS_SECRET", "GITHUB_TOKEN", "GH_TOKEN", "NPM_TOKEN", "PYPI_")
@@ -114,6 +137,17 @@ class ClaudeCodeProvider:
             )
         return path
 
+    def resolve_command(self) -> list[str]:
+        """The argv prefix that starts the CLI.
+
+        On Windows an npm install provides ``claude.cmd``, which CreateProcess
+        runs through cmd.exe. cmd.exe re-parses the command line: it stops at the
+        first newline (our system prompt has many) and interprets ``& | ^ %``.
+        So a batch shim is never executed directly; it is resolved to
+        ``node <package>/cli.js``, or refused with a clear error.
+        """
+        return resolve_cli_command(self.resolve_executable())
+
     async def execute(
         self,
         request: AgentRequest,
@@ -121,7 +155,7 @@ class ClaudeCodeProvider:
         timeout_seconds: int,
         on_process_start: ProcessStarted | None = None,
     ) -> AgentResult:
-        argv = build_argv(self.settings, request, self.resolve_executable())
+        argv = build_argv(self.settings, request, self.resolve_command())
         started = time.monotonic()
         proc = await asyncio.create_subprocess_exec(
             *argv,

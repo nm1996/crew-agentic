@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -90,6 +91,7 @@ def test_commit_all_keeps_new_secret_files_out(project: Project):
     assert (path / ".env").exists()  # left in place for inspection
 
 
+@pytest.mark.skipif(os.name == "nt", reason="shell-script hook")
 def test_repository_hooks_never_run(project: Project, repo: Path):
     hook = repo / ".git" / "hooks" / "pre-commit"
     marker = repo.parent / "hook-ran"

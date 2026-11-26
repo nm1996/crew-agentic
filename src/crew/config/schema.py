@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 CONFIG_VERSION = 1
 MAX_IMPLEMENTERS_HARD_LIMIT = 2
 MAX_CORRECTION_CYCLES_HARD_LIMIT = 5
+SHELL_RULE_PREFIXES = ("Bash(", "PowerShell(")
 
 
 class _Strict(BaseModel):
@@ -41,12 +42,12 @@ class ClaudeCodeSettings(_Strict):
     @classmethod
     def _only_scoped_bash(cls, rules: list[str]) -> list[str]:
         for rule in rules:
-            if not (rule.startswith("Bash(") and rule.endswith(")")) or rule in {
-                "Bash(*)",
-                "Bash(:*)",
-            }:
+            scoped = rule.startswith(SHELL_RULE_PREFIXES) and rule.endswith(")")
+            inner = rule[rule.find("(") + 1 : -1].strip()
+            if not scoped or inner in {"", "*", ":*"}:
                 raise ValueError(
-                    f"invalid bash rule {rule!r}: use a scoped rule such as 'Bash(uv run pytest:*)'"
+                    f"invalid shell rule {rule!r}: use a scoped rule such as "
+                    "'Bash(uv run pytest:*)' (or 'PowerShell(...)' on Windows)"
                 )
         return rules
 
@@ -65,7 +66,9 @@ class ExecutionSettings(_Strict):
     preserve_worktrees_on_failure: bool = True
     # Commands CREW itself runs in the integration worktree as test evidence.
     # Parsed with shlex, executed without a shell.
-    verification_commands: list[str] = Field(default_factory=list)
+    # Each entry is a string (split like a shell, never run by one) or an
+    # explicit argv list such as ["python", "-m", "pytest"] (most portable).
+    verification_commands: list[str | list[str]] = Field(default_factory=list)
 
 
 class GitSettings(_Strict):

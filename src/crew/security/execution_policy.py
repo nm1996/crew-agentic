@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,17 @@ _DESTRUCTIVE_TOKENS = {
     "killall",
     "shutdown",
     "reboot",
+    # Windows
+    "del",
+    "erase",
+    "rd",
+    "remove-item",
+    "taskkill",
+    "icacls",
+    "takeown",
+    "format",
+    "reg",
+    "runas",
 }
 _GIT_DESTRUCTIVE_ALWAYS = {"clean", "stash", "restore", "filter-branch", "gc", "prune"}
 _GIT_DESTRUCTIVE_FLAGS = {
@@ -72,8 +84,37 @@ def git_subcommand(args: list[str]) -> tuple[str, set[str]]:
     return args[i], set(args[i + 1 :])
 
 
-_NETWORK_TOKENS = {"curl", "wget", "ssh", "scp", "rsync", "nc", "ncat", "telnet", "ftp"}
-_SHELLS = {"sh", "bash", "zsh", "fish", "dash", "ksh"}
+_NETWORK_TOKENS = {
+    "curl",
+    "wget",
+    "ssh",
+    "scp",
+    "rsync",
+    "nc",
+    "ncat",
+    "telnet",
+    "ftp",
+    "invoke-webrequest",
+    "iwr",
+    "bitsadmin",
+    "certutil",
+}
+_SHELLS = {"sh", "bash", "zsh", "fish", "dash", "ksh", "cmd", "powershell", "pwsh"}
+_EXECUTABLE_SUFFIXES = (".exe", ".cmd", ".bat", ".com", ".ps1")
+# Characters cmd.exe interprets when Windows runs a .cmd/.bat file implicitly.
+_CMD_METACHARS = frozenset('&|<>^%!"\n\r')
+_SHELL_OPERATORS = frozenset({"|", "&&", "||", ";", ">", ">>", "<", "&"})
+
+
+def executable_name(path: str) -> str:
+    """Normalised program name: ``C:\\x\\RM.EXE`` and ``/bin/rm`` both become ``rm``."""
+    name = Path(path.replace("\\", "/")).name.casefold()
+    for suffix in _EXECUTABLE_SUFFIXES:
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
 _READ_ONLY = {"ls", "cat", "head", "tail", "wc", "grep", "rg", "find", "pwd", "echo", "true"}
 
 
@@ -81,7 +122,7 @@ def classify_command(argv: list[str]) -> CommandCategory:
     """Classify a command per SECURITY.md §3. Unknown commands are VERIFICATION."""
     if not argv:
         raise PolicyViolationError("empty command")
-    exe = Path(argv[0]).name
+    exe = executable_name(argv[0])
     if exe in _DESTRUCTIVE_TOKENS or exe in _SHELLS:
         return CommandCategory.DESTRUCTIVE
     if exe in _NETWORK_TOKENS:
@@ -102,19 +143,48 @@ def classify_command(argv: list[str]) -> CommandCategory:
     return CommandCategory.VERIFICATION
 
 
-def parse_verification_command(command: str) -> list[str]:
-    """Parse a configured verification command and refuse unsafe categories."""
-    argv = shlex.split(command)
+def _split(command: str) -> list[str]:
+    if os.name != "nt":
+        return shlex.split(command)
+    # Windows: keep backslashes in paths; strip surrounding quotes only.
+    return [
+        tok[1:-1] if len(tok) > 1 and tok[0] == tok[-1] == '"' else tok
+        for tok in shlex.split(command, posix=False)
+    ]
+
+
+def parse_verification_command(command: str | list[str]) -> list[str]:
+    """Turn a configured verification command into a safe argv.
+
+    Accepts a string (split like a shell would, but never run by one) or an
+    explicit argument list, which is the most portable form. The program is
+    resolved on ``PATH`` (honouring ``PATHEXT`` on Windows).
+    """
+    argv = list(command) if isinstance(command, list) else _split(command)
+    shown = command if isinstance(command, str) else " ".join(command)
+    if not argv:
+        raise PolicyViolationError("empty verification command")
     category = classify_command(argv)
     if category in (CommandCategory.DESTRUCTIVE, CommandCategory.NETWORK):
         raise PolicyViolationError(
-            f"verification command {command!r} is classified as {category.value}; "
+            f"verification command {shown!r} is classified as {category.value}; "
             "only read-only and verification commands may run unattended",
         )
-    if any(tok in {"|", "&&", "||", ";", ">", ">>", "<"} for tok in argv):
+    if any(tok in _SHELL_OPERATORS for tok in argv):
         raise PolicyViolationError(
-            f"verification command {command!r} uses shell operators; commands run without a shell"
+            f"verification command {shown!r} uses shell operators; commands run without a shell"
         )
+    resolved = shutil.which(argv[0])
+    if resolved:
+        argv[0] = resolved
+        if resolved.casefold().endswith((".cmd", ".bat")) and any(
+            ch in _CMD_METACHARS for arg in argv[1:] for ch in arg
+        ):
+            # Windows runs batch files through cmd.exe, which would interpret these.
+            raise PolicyViolationError(
+                f"verification command {shown!r} runs a batch file with characters that "
+                "cmd.exe interprets (& | < > ^ % ! quotes); simplify the arguments"
+            )
     return argv
 
 
@@ -139,10 +209,30 @@ class CommandResult:
 SPAWN_FAILED_EXIT_CODE = 127
 
 
+_WINDOWS_ENV = (
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMDATA",
+    "PROGRAMFILES",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
+)
+
+
 def _minimal_env() -> dict[str, str]:
     # Pass a small allow-list rather than the full environment, so verification
     # commands do not inherit unrelated secrets. Project tools that need more can
-    # read their own config files.
+    # read their own config files. Windows needs a few system variables to run
+    # anything at all (e.g. SYSTEMROOT for sockets and the C runtime).
     keep = (
         "PATH",
         "HOME",
@@ -153,6 +243,7 @@ def _minimal_env() -> dict[str, str]:
         "USER",
         "VIRTUAL_ENV",
         "UV_CACHE_DIR",
+        *(_WINDOWS_ENV if os.name == "nt" else ()),
     )
     env = {k: os.environ[k] for k in keep if k in os.environ}
     env["CI"] = "1"

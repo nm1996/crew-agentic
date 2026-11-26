@@ -582,7 +582,8 @@ class Orchestrator:
                 cycle=run.correction_cycle,
             )
             status = "timed out" if result.timed_out else f"exit {result.exit_code}"
-            self.notify(f"  {command} → {status}")
+            shown = command if isinstance(command, str) else " ".join(command)
+            self.notify(f"  {shown} → {status}")
 
     def _integrated_diff(self, run: Run) -> str:
         return self.p.git.diff(run.base_commit, self.p.workspace.integration_branch(run.id))

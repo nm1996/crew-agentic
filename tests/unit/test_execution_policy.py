@@ -6,6 +6,7 @@ from crew.domain.enums import CommandCategory
 from crew.domain.errors import PolicyViolationError
 from crew.security.execution_policy import (
     classify_command,
+    executable_name,
     parse_verification_command,
     run_command,
 )
@@ -42,7 +43,47 @@ def test_unsafe_verification_commands_are_refused(command):
 
 
 def test_verification_command_is_parsed_without_shell():
-    assert parse_verification_command("uv run pytest -q") == ["uv", "run", "pytest", "-q"]
+    argv = parse_verification_command("uv run pytest -q")
+    assert executable_name(argv[0]) == "uv"
+    assert argv[1:] == ["run", "pytest", "-q"]
+
+
+def test_verification_command_as_argv_list():
+    argv = parse_verification_command([sys.executable, "-m", "pytest", "a b"])
+    assert argv[1:] == ["-m", "pytest", "a b"]
+
+
+@pytest.mark.parametrize(
+    ("path", "name"),
+    [
+        ("/bin/rm", "rm"),
+        ("C:\\Windows\\System32\\DEL.EXE", "del"),
+        ("npm.cmd", "npm"),
+        ("python3.12", "python3.12"),
+    ],
+)
+def test_executable_name_normalisation(path, name):
+    assert executable_name(path) == name
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["C:\\x\\rm.exe", "-rf", "y"],
+        ["Remove-Item", "x"],
+        ["powershell", "-c", "x"],
+        ["cmd", "/c", "x"],
+    ],
+)
+def test_windows_destructive_and_shell_commands(argv):
+    assert classify_command(argv) is CommandCategory.DESTRUCTIVE
+
+
+def test_batch_file_with_cmd_metacharacters_is_refused(monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda _name: "C:/nodejs/npm.cmd")
+    assert parse_verification_command(["npm", "test"])[0] == "C:/nodejs/npm.cmd"
+    with pytest.raises(PolicyViolationError, match="batch file"):
+        parse_verification_command(["npm", "test", "--", "a&calc"])
 
 
 async def test_run_command_captures_exit_code(tmp_path):
