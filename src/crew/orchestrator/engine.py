@@ -17,7 +17,7 @@ import logging
 import uuid
 from collections.abc import Callable, Coroutine, Iterator
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 from crew.agents import payloads
@@ -82,6 +82,14 @@ def _expect[M](value: object, cls: type[M]) -> M:
     if not isinstance(value, cls):
         raise CrewError(f"expected {cls.__name__} from agent runtime, got {type(value).__name__}")
     return value
+
+
+@dataclass
+class CleanupReport:
+    removed_worktrees: list[str] = field(default_factory=list)
+    kept_worktrees: list[str] = field(default_factory=list)
+    deleted_branches: list[str] = field(default_factory=list)
+    kept_branches: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -814,15 +822,86 @@ class Orchestrator:
     def _run_dir(self, run: Run):
         return self.p.paths.run_dir(run.id)
 
-    def _cleanup_clean_worktrees(self, run_id: str) -> None:
-        """Remove CREW worktrees that hold no uncommitted work. Branches are kept."""
+    def _cleanup_clean_worktrees(self, run_id: str) -> tuple[list[str], list[str]]:
+        """Remove CREW worktrees that hold no uncommitted work. Branches are kept.
+
+        Returns (removed, kept) paths.
+        """
         ws = self.p.workspace
         run_dir = ws.run_dir(run_id)
+        removed: list[str] = []
+        kept: list[str] = []
         if not run_dir.exists():
-            return
+            return removed, kept
         for child in sorted(run_dir.iterdir()):
-            if child.is_dir() and ws.owned(child) and not ws.remove_worktree_if_clean(child):
+            if not child.is_dir() or not ws.owned(child):
+                continue
+            if ws.remove_worktree_if_clean(child):
+                removed.append(str(child))
+            else:
+                kept.append(str(child))
                 self.store.add_event(run_id, "worktree_preserved", str(child))
+        with contextlib.suppress(OSError):
+            run_dir.rmdir()  # only succeeds when nothing is left
+        return removed, kept
+
+    def cleanup(self, run_id: str, *, branches: bool = False) -> CleanupReport:
+        """Remove a finished run's clean worktrees and, optionally, its branches.
+
+        Never touches worktrees with uncommitted work. Branch rules:
+        * task branches are deleted once their work is in the integration branch
+          (or the run was rejected/cancelled, i.e. the work was discarded);
+        * the integration branch of a COMPLETED run is deleted only after you
+          merged it into the base branch;
+        * FAILED runs keep their branches so `crew retry` keeps working.
+        """
+        with self._lock(run_id):
+            run = self.store.get_run(run_id)
+            state = RunState(run.state)
+            if not is_terminal(state):
+                raise InvalidTransitionError(
+                    f"Run {run_id} is {run.state}; only finished runs can be cleaned up.",
+                    hint="Use `crew stop` first if you want to abandon it.",
+                )
+            removed, kept = self._cleanup_clean_worktrees(run_id)
+            report = CleanupReport(removed_worktrees=removed, kept_worktrees=kept)
+            if branches and state is not RunState.FAILED:
+                self._cleanup_branches(run, report)
+            elif branches:
+                report.kept_branches.append("(all) — FAILED runs keep branches for `crew retry`")
+            self.store.add_event(
+                run_id,
+                "cleanup",
+                f"removed {len(removed)} worktree(s), deleted "
+                f"{len(report.deleted_branches)} branch(es)",
+            )
+            return report
+
+    def _cleanup_branches(self, run: Run, report: CleanupReport) -> None:
+        git, ws = self.p.git, self.p.workspace
+        prefix = f"{ws.prefix}/{run.id}/"
+        integration = ws.integration_branch(run.id)
+        completed = run.state == RunState.COMPLETED
+        for branch in git.branches(f"{prefix}*"):
+            if branch == integration:
+                merged = (
+                    bool(run.base_branch)
+                    and git.branch_exists(run.base_branch)
+                    and (git.is_ancestor(integration, run.base_branch))
+                )
+                deletable = merged or not completed
+                reason = "not merged into " + (run.base_branch or "the base branch") + " yet"
+            else:
+                deletable = not completed or git.is_ancestor(branch, integration)
+                reason = "not contained in the integration branch"
+            if not deletable:
+                report.kept_branches.append(f"{branch} ({reason})")
+                continue
+            try:
+                git.delete_owned_branch(branch, prefix)
+                report.deleted_branches.append(branch)
+            except CrewError as exc:  # e.g. still checked out in a preserved worktree
+                report.kept_branches.append(f"{branch} ({exc.message})")
 
     def _write_implementation_artifact(self, run: Run) -> None:
         lines = ["# Implementation", ""]

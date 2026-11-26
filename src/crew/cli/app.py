@@ -282,6 +282,41 @@ def stop(run_id: RunIdArg) -> None:
         )
 
 
+@app.command()
+@handle_errors
+def cleanup(
+    run_id: Annotated[str | None, typer.Argument(help="Run id (or use --all).")] = None,
+    all_runs: Annotated[bool, typer.Option("--all", help="Clean every finished run.")] = False,
+    branches: Annotated[
+        bool, typer.Option("--branches", help="Also delete the run's CREW branches (safely).")
+    ] = False,
+) -> None:
+    """Remove finished runs' clean worktrees (and with --branches, their CREW branches)."""
+    project = open_project()
+    orch = make_orchestrator(project, _notify)
+    if all_runs == bool(run_id):
+        raise CrewError("Pass either a run id or --all.")
+    runs = (
+        [
+            r.id
+            for r in project.store.list_runs(limit=10_000)
+            if RunState(r.state) in TERMINAL_STATES
+        ]
+        if all_runs
+        else [run_id]
+    )
+    for rid in runs:
+        report = orch.cleanup(rid, branches=branches)
+        console.print(
+            f"[bold]{rid}[/]: removed {len(report.removed_worktrees)} worktree(s), "
+            f"deleted {len(report.deleted_branches)} branch(es)"
+        )
+        for path in report.kept_worktrees:
+            console.print(f"  [yellow]kept[/] {path} (has uncommitted changes)")
+        for branch in report.kept_branches:
+            console.print(f"  [yellow]kept[/] {branch}")
+
+
 # ---- inspection -------------------------------------------------------------
 
 

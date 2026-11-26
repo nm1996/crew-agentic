@@ -498,8 +498,7 @@ def test_worktrees_removed_on_failure_when_not_preserving(make_orch, configure_p
     orch = make_orch(project, fake)
     run = orch.approve_plan(orch.start_run("x").id)
     assert run.state == RunState.FAILED
-    leftovers = [p for p in orch.p.workspace.run_dir(run.id).iterdir() if p.is_dir()]
-    assert leftovers == []  # all were clean, so all were removed
+    assert not orch.p.workspace.run_dir(run.id).exists()  # all were clean, so all removed
 
 
 def test_run_budget_stops_spending(make_orch, configure_project):
@@ -562,3 +561,38 @@ def test_only_failed_runs_can_be_retried(make_orch):
     run = orch.start_run("x")
     with pytest.raises(InvalidTransitionError):
         orch.retry(run.id)
+
+
+def test_cleanup_removes_worktrees_and_merged_branches_only(make_orch, repo: Path):
+    orch = make_orch()
+    run = orch.accept(orch.approve_plan(orch.start_run("x").id).id)
+    report = orch.cleanup(run.id, branches=True)
+    branches = git(repo, "branch", "--list", f"crew/{run.id}/*").split()
+    # Task branches are inside the integration branch: deleted.
+    # The integration branch is not merged into main yet: kept.
+    assert branches == [run.integration_branch]
+    assert any("not merged" in b for b in report.kept_branches)
+
+    git(repo, "merge", "--no-ff", "-q", "-m", "take result", run.integration_branch)
+    orch.cleanup(run.id, branches=True)
+    assert git(repo, "branch", "--list", f"crew/{run.id}/*").strip() == ""
+    assert not orch.p.workspace.run_dir(run.id).exists()
+
+
+def test_cleanup_keeps_dirty_worktrees_and_failed_run_branches(make_orch):
+    fake = FakeProvider().on(Role.IMPLEMENTER, lambda _r: {"summary": ""})
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.FAILED
+    dirty = Path(orch.store.get_task(run.id, "part-a").worktree_path)
+    (dirty / "wip.txt").write_text("keep me")
+    report = orch.cleanup(run.id, branches=True)
+    assert str(dirty) in report.kept_worktrees and (dirty / "wip.txt").exists()
+    assert not report.deleted_branches
+
+
+def test_cleanup_refuses_active_runs(make_orch):
+    orch = make_orch()
+    run = orch.start_run("x")
+    with pytest.raises(InvalidTransitionError):
+        orch.cleanup(run.id)
