@@ -57,3 +57,46 @@ def test_scoped_bash_rules_are_accepted():
 def test_non_mapping_is_rejected():
     with pytest.raises(ConfigError):
         parse_config(["not", "a", "mapping"])
+
+
+def test_role_settings_precedence():
+    from crew.config.schema import role_settings
+
+    config = parse_config(
+        base(
+            provider={
+                "claude_code": {
+                    "model": "opus",
+                    "profile": "balanced",
+                    "roles": {"implementer": {"model": "fable", "effort": "high"}},
+                }
+            }
+        )
+    )
+    cc = config.provider.claude_code
+    assert role_settings(cc, "implementer").model == "fable"  # explicit wins
+    assert role_settings(cc, "implementer").effort == "high"
+    assert role_settings(cc, "evaluator").model == "sonnet"  # from the profile
+    assert role_settings(cc, "director").model == "opus"  # global fallback
+    assert role_settings(cc, "director").effort == "medium"
+
+
+def test_default_profile_changes_nothing():
+    from crew.config.schema import role_settings
+
+    cc = parse_config(base()).provider.claude_code
+    for role in ("director", "implementer", "reviewer", "evaluator"):
+        assert role_settings(cc, role).model is None and role_settings(cc, role).effort is None
+
+
+@pytest.mark.parametrize(
+    "claude",
+    [
+        {"roles": {"tester": {"model": "x"}}},
+        {"roles": {"reviewer": {"effort": "huge"}}},
+        {"profile": "cheapest"},
+    ],
+)
+def test_invalid_role_settings_are_rejected(claude):
+    with pytest.raises(ConfigError):
+        parse_config(base(provider={"claude_code": claude}))

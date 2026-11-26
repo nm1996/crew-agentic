@@ -659,7 +659,15 @@ class Orchestrator:
             self.notify(f"  {shown}{where} → {status}")
 
     def _integrated_diff(self, run: Run) -> str:
-        return self.p.git.diff(run.base_commit, self.p.workspace.integration_branch(run.id))
+        """The integrated change as markdown, in the configured review_context mode."""
+        git, branch = self.p.git, self.p.workspace.integration_branch(run.id)
+        patch = git.diff(run.base_commit, branch)
+        mode = self.config.execution.review_context
+        if mode == "full":
+            return payloads.diff_section(run.base_commit, patch, "", [], mode="full")
+        stat = git.run("diff", "--stat", f"{run.base_commit}...{branch}")
+        files = git.changed_files(run.base_commit, branch)
+        return payloads.diff_section(run.base_commit, patch, stat, files, mode="summary")
 
     def _cycle_commands(self, run: Run) -> list:
         """Latest result per verification command in the current cycle.

@@ -641,3 +641,20 @@ def test_report_contains_usage_by_role(make_orch):
     assert "## Agent usage" in report
     assert "| implementer | 3 | 0.7500 |" in report
     assert "**1.5000**" in report  # 6 executions x 0.25
+
+
+def test_summary_review_context_keeps_prompts_small(make_orch, configure_project):
+    def big_implementer(req: AgentRequest) -> dict:
+        (req.cwd / "big.txt").write_text("line of generated content\n" * 5000)  # ~130 kB
+        return default_implementer(req)
+
+    fake = FakeProvider().on(Role.IMPLEMENTER, big_implementer)
+    project = configure_project(execution={"review_context": "summary"})
+    orch = make_orch(project, fake)
+    orch.approve_plan(orch.start_run("x").id)
+    reviewer = next(c.prompt for c in fake.calls if c.role is Role.REVIEWER)
+    evaluator = next(c.prompt for c in fake.calls if c.role is Role.EVALUATOR)
+    for prompt in (reviewer, evaluator):
+        assert "## Changed files" in prompt and "- big.txt" in prompt
+        assert "open the changed files with your Read tool" in prompt
+        assert len(prompt) < 30_000  # the full diff alone would be > 120 kB

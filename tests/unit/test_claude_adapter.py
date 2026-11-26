@@ -248,3 +248,20 @@ def test_parse_usage_and_models():
     parsed = parse_cli_output(out)
     assert parsed.usage == {"input_tokens": 10, "output_tokens": 20, "cache_read_input_tokens": 300}
     assert parsed.models == ["claude-opus-5-5"] and parsed.num_turns == 7
+
+
+def test_profile_sets_model_and_effort_per_role(tmp_path):
+    config = parse_config(
+        {
+            "version": 1,
+            "project": {"name": "t"},
+            "provider": {"claude_code": {"profile": "economy"}},
+        }
+    )
+    cc = config.provider.claude_code
+    evaluator = build_argv(cc, make_request(Role.EVALUATOR, tmp_path), "claude")
+    implementer = build_argv(cc, make_request(Role.IMPLEMENTER, tmp_path), "claude")
+    assert _value(evaluator, "--model") == "haiku" and _value(evaluator, "--effort") == "low"
+    assert _value(implementer, "--model") == "sonnet"
+    default = build_argv(CONFIG.provider.claude_code, make_request(Role.DIRECTOR, tmp_path), "c")
+    assert "--model" not in default and "--effort" not in default

@@ -212,6 +212,10 @@ def check_claude(config: CrewConfig | None) -> list[Check]:
     help_proc = _run([*command, "--help"])
     help_text = help_proc.stdout if help_proc else ""
     flags = list(REQUIRED_CLAUDE_FLAGS)
+    if settings and (
+        settings.profile != "default" or any(r.effort for r in settings.roles.values())
+    ):
+        flags.append("--effort")
     missing = [f for f in flags if f not in help_text]
     if missing:
         checks.append(

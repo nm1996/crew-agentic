@@ -25,6 +25,47 @@ def _truncate(text: str, limit: int) -> str:
     )
 
 
+SUMMARY_PATCH_CHARS = 12_000
+
+
+def diff_section(base: str, patch: str, stat: str, files: list[str], *, mode: str = "full") -> str:
+    """The integrated change as given to Reviewer and Evaluator.
+
+    ``full`` embeds the whole patch (bounded by DIFF_MAX_CHARS). ``summary`` gives
+    stats, the changed-file list and only the start of the patch, and tells the
+    agent to open files itself: far fewer prompt tokens on large changes.
+    """
+    header = f"# Integrated change (base {base[:12]} → integration branch)"
+    if mode == "full":
+        return "\n".join([header, "", "```diff", _truncate(patch, DIFF_MAX_CHARS), "```"])
+    head = patch[:SUMMARY_PATCH_CHARS]
+    more = len(patch) > SUMMARY_PATCH_CHARS
+    return "\n".join(
+        [
+            header,
+            "",
+            "Your working directory contains the integrated result. The patch below is",
+            "abridged; open the changed files with your Read tool to inspect them.",
+            "",
+            "## Diff stat",
+            "",
+            "```",
+            stat.strip(),
+            "```",
+            "",
+            "## Changed files",
+            "",
+            *[f"- {f}" for f in files],
+            "",
+            "## Patch (beginning)" + (" — truncated" if more else ""),
+            "",
+            "```diff",
+            head,
+            "```",
+        ]
+    )
+
+
 def director_prompt(run: Run, context_md: str, previous_error: str | None = None) -> str:
     parts = [
         "# Original request",
@@ -118,11 +159,7 @@ def reviewer_prompt(
         parts += [f"## {t.key}: {t.title}", *[f"- {c}" for c in t.acceptance_criteria]]
     parts += [
         "",
-        f"# Integrated diff (base {run.base_commit[:12]} → integration branch)",
-        "",
-        "```diff",
-        _truncate(diff, DIFF_MAX_CHARS),
-        "```",
+        diff,
         "",
         "# Verification evidence recorded by CREW",
         "",
@@ -174,11 +211,7 @@ def evaluator_prompt(
             _json(run.plan),
             "```",
             "",
-            "# Integrated diff",
-            "",
-            "```diff",
-            _truncate(diff, DIFF_MAX_CHARS),
-            "```",
+            diff,
             "",
             "# Verification evidence recorded by CREW (trustworthy)",
             "",

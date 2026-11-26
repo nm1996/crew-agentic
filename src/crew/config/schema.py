@@ -25,10 +25,46 @@ class ProjectSettings(_Strict):
     name: str = Field(min_length=1)
 
 
+Effort = Literal["low", "medium", "high", "xhigh", "max"]
+RoleName = Literal["director", "implementer", "reviewer", "evaluator"]
+CostProfile = Literal["default", "balanced", "economy"]
+
+
+class RoleSettings(_Strict):
+    """Per-role model and effort; ``None`` means "inherit"."""
+
+    model: str | None = None  # alias such as "opus", "sonnet", "haiku", or a full model id
+    effort: Effort | None = None  # passed as --effort
+
+
+# Defaults each cost profile applies before explicit `roles` entries.
+# Chosen from the measured reference run (docs/examples/spring-boot-crud.md):
+# implementation dominates cost; review/evaluation read evidence and need less.
+PROFILE_ROLES: dict[str, dict[str, RoleSettings]] = {
+    "default": {},
+    "balanced": {
+        "director": RoleSettings(effort="medium"),
+        "implementer": RoleSettings(effort="medium"),
+        "reviewer": RoleSettings(model="sonnet", effort="medium"),
+        "evaluator": RoleSettings(model="sonnet", effort="low"),
+    },
+    "economy": {
+        "director": RoleSettings(model="sonnet", effort="medium"),
+        "implementer": RoleSettings(model="sonnet", effort="medium"),
+        "reviewer": RoleSettings(model="sonnet", effort="low"),
+        "evaluator": RoleSettings(model="haiku", effort="low"),
+    },
+}
+
+
 class ClaudeCodeSettings(_Strict):
     executable: str = "claude"
     timeout_seconds: int = Field(default=1800, ge=30, le=4 * 3600)
-    model: str | None = None
+    model: str | None = None  # default model for every role
+    # Cost profile: per-role model/effort defaults (see PROFILE_ROLES).
+    profile: CostProfile = "default"
+    # Explicit per-role overrides; win over the profile and over `model`.
+    roles: dict[RoleName, RoleSettings] = Field(default_factory=dict)
     max_budget_usd: float | None = Field(default=None, gt=0)
     # Always passed as --restricted. Kept as a key only so older configs that set
     # it still load; it cannot be turned off.
@@ -52,6 +88,16 @@ class ClaudeCodeSettings(_Strict):
         return rules
 
 
+def role_settings(settings: ClaudeCodeSettings, role: str) -> RoleSettings:
+    """Effective model/effort for ``role``: explicit roles > profile > global model."""
+    explicit = settings.roles.get(role) or RoleSettings()  # type: ignore[call-overload]
+    profile = PROFILE_ROLES[settings.profile].get(role, RoleSettings())
+    return RoleSettings(
+        model=explicit.model or profile.model or settings.model,
+        effort=explicit.effort or profile.effort,
+    )
+
+
 class ProviderSettings(_Strict):
     default: Literal["claude_code", "fake"] = "claude_code"
     claude_code: ClaudeCodeSettings = Field(default_factory=ClaudeCodeSettings)
@@ -71,6 +117,10 @@ class ExecutionSettings(_Strict):
     # Each entry is a string (split like a shell, never run by one) or an
     # explicit argv list such as ["python", "-m", "pytest"] (most portable).
     verification_commands: list[str | list[str]] = Field(default_factory=list)
+    # How much of the integrated diff Reviewer and Evaluator get in their prompt:
+    # "full" embeds the whole diff; "summary" embeds stats, the file list and the
+    # first part of the patch, and they open files with their Read tool.
+    review_context: Literal["full", "summary"] = "full"
     # Isolation for verification commands; see crew/security/sandbox.py.
     sandbox: Literal["none", "bwrap", "docker"] = "none"
     sandbox_image: str | None = None  # required for docker

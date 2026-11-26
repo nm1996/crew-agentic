@@ -32,7 +32,7 @@ import shutil
 import time
 from pathlib import Path
 
-from crew.config.schema import ClaudeCodeSettings
+from crew.config.schema import ClaudeCodeSettings, role_settings
 from crew.domain.errors import ProviderError
 from crew.providers.base import AgentRequest, AgentResult, ProcessStarted
 from crew.providers.claude_code.parser import parse_cli_output
@@ -87,8 +87,11 @@ def build_argv(
     argv += ["--tools", ",".join(tools), "--allowedTools", ",".join(allowed)]
     if caps.deny_read_globs:
         argv += ["--disallowedTools", ",".join(f"Read({g})" for g in caps.deny_read_globs)]
-    if settings.model:
-        argv += ["--model", settings.model]
+    effective = role_settings(settings, request.role.value)
+    if effective.model:
+        argv += ["--model", effective.model]
+    if effective.effort:
+        argv += ["--effort", effective.effort]
     budget = request.max_budget_usd or settings.max_budget_usd
     if budget:
         argv += ["--max-budget-usd", f"{budget:.2f}"]
