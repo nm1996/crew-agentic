@@ -37,21 +37,26 @@ Driven by an independent review of 0.1.0. Each item links to its decision record
 **Exit condition:** full suite green on all three operating systems; real Claude Code smoke
 run passes on Linux.
 
-## M8 — Candidates
+## M8 — Sandboxing, Windows trees, real-CLI checks, releases (0.3.0)
+
+| Item | Status | Decision |
+|---|---|---|
+| Sandboxed verification (`execution.sandbox: none\|bwrap\|docker`), fail-closed | Done | D19 |
+| Windows Job Objects (kill-on-close agent trees) | Done | D13 |
+| Scoped shell rules verified against the real CLI; opt-in smoke workflow on all OSes | Done (Linux verified; Windows/macOS need the API-key secret) | D20 |
+| Tag-driven GitHub releases | Done | Releases |
+
+## M9 — Candidates
 
 Ordered by value; none started.
 
-1. **Sandboxed verification** (`execution.sandbox: none|bwrap|docker`) — closes the
-   "verification runs agent-written code" limitation.
-2. **Windows Job Objects** for kill-on-close of whole agent trees, and a Windows smoke
-   run against a native `claude.exe` (also verifies `PowerShell(...)` rules).
-3. **Explicit `crew publish <id> [--pr]`** — push only `crew/<run>/integration` and open a
+1. **Explicit `crew publish <id> [--pr]`** — push only `crew/<run>/integration` and open a
    PR, on explicit command, keeping "never push automatically".
-4. **Claude Agent SDK provider** behind `AgentProvider`, with programmatic `can_use_tool`
+2. **Claude Agent SDK provider** behind `AgentProvider`, with programmatic `can_use_tool`
    permission decisions and streaming progress.
-5. **Observability:** `stream-json` tool-use events per execution, `crew logs -f`.
-6. **Interactive approvals** (`crew run --interactive`), later a TUI.
-7. **PyPI release** with trusted publishing on tags.
+3. **Observability:** `stream-json` tool-use events per execution, `crew logs -f`.
+4. **Interactive approvals** (`crew run --interactive`), later a TUI.
+5. **PyPI release** with trusted publishing on tags.
 
 ## M0 — Foundation
 

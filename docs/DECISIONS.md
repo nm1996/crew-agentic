@@ -162,8 +162,12 @@ All OS-specific code lives in `src/crew/system/`:
   the OS when the holder dies.
 - **Termination signals:** SIGTERM and SIGHUP (POSIX) and SIGBREAK (Windows) are handled
   like Ctrl-C, so asyncio cancellation stops agent trees before CREW exits.
-- psutil is the only new dependency; Job Objects (ctypes) were left out for now (see
-  known limitations).
+- **Windows Job Objects** (0.3.0, `crew/system/winjob.py`, ctypes): every agent and
+  verification process is assigned to its own `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job.
+  Terminating the job ends grandchildren whose parent already exited, and Windows kills
+  the tree if CREW dies. Processes a child spawns in the few milliseconds before it is
+  assigned are still covered by psutil tree termination.
+- psutil is the only new dependency.
 
 ## D14. Git policy
 
@@ -210,24 +214,62 @@ branches so `crew retry` keeps working.
 Correction tasks are named `crew-fix-<cycle>`; plans may not use the `crew-` prefix, so a
 Director task can never collide with a CREW-generated one.
 
+## D19. Verification sandbox
+
+`execution.sandbox` isolates the commands CREW runs as evidence, because they execute
+code agents may have written:
+
+| Mode | Isolation | Notes |
+|---|---|---|
+| `none` (default) | none | `doctor` warns when verification commands are configured. |
+| `bwrap` (Linux) | read-only filesystem except the worktree, a private `/tmp` and `sandbox_writable_paths`; credential directories in `$HOME` (`.ssh`, `.aws`, `.config/gh`, `.claude`, …) hidden; all namespaces unshared, so **no network** unless `sandbox_network` | Read access to the rest of the filesystem remains; without network it cannot be exfiltrated. |
+| `docker` | worktree at `/workspace` in `sandbox_image`, your UID, `--cap-drop ALL`, `no-new-privileges`, read-only root, `--network none` by default | The toolchain must be in the image; programs are not resolved on the host. |
+
+Design choices:
+
+- **Fail closed:** if the configured sandbox is unavailable, the run fails before any
+  command runs (retryable), instead of silently running unsandboxed.
+- Network is off by default; dependency installation inside verification therefore needs
+  `sandbox_network: true` or a pre-populated cache bound via `sandbox_writable_paths`.
+- The sandbox used is recorded per command (`command_executions.sandbox`, migration 0004)
+  and shown in evidence and reports.
+- Agents themselves are not sandboxed by CREW; they are confined by Claude Code's
+  permission system (D6).
+
+## D20. Real-CLI verification
+
+The opt-in smoke tests (`tests/e2e/test_claude_smoke.py`) run planning, a full workflow
+and a scoped-shell-rule workflow against the real Claude Code CLI. The
+`Claude smoke` workflow (manual dispatch, needs the `ANTHROPIC_API_KEY` secret) runs them
+on Linux, macOS and Windows with the native Claude Code build.
+
+Observed on Linux (CLI 2.1.319): a scoped rule containing spaces
+(`Bash(python3 --version:*)`) reaches the CLI intact and is enforced; a compound command
+outside it was blocked. Claude Code itself auto-allows some read-only commands such as
+`git status` without a rule.
+
+## Releases
+
+Version tags `vX.Y.Z` trigger `.github/workflows/release.yml`: the tag must equal the
+package version, tests run, and a GitHub release is published with the wheel, the sdist
+and the matching `CHANGELOG.md` section.
+
 ## Known limitations
 
-- **Verification commands execute agent-written code.** `execution.verification_commands`
-  run in the integration worktree with your user's privileges, and Implementers can edit
-  what those commands execute (`conftest.py`, `package.json` scripts, `Makefile`, …). Even
-  with no Bash rules, configuring verification therefore grants agent-authored code
-  execution outside Claude's permission system. Review the diff of test/build
-  configuration when in doubt; a sandboxed runner is on the roadmap.
+- **Verification commands execute agent-written code.** Implementers can edit what those
+  commands run (`conftest.py`, `package.json` scripts, `Makefile`, …). With
+  `execution.sandbox: none` (the default) that code runs with your user's privileges.
+  Use `bwrap` or `docker` (D19). Even in `bwrap`, the code can *read* files outside the
+  hidden credential directories; it cannot write them or reach the network.
 - A Git worktree is isolation of files, not a security sandbox. Agents with Bash rules
   can run whatever those rules match, with your user's privileges. Grant narrow rules.
 - Claude Code discovers `CLAUDE.md` files upward from its working directory; worktrees
   live inside your repository, so your root `CLAUDE.md` is visible to agents (usually
   desirable). Treat it like any other repository content: data, not authority.
-- On Windows, grandchildren whose parent already exited cannot be found by tree walking;
-  a Job Object based kill is planned.
 - Secret redaction is pattern-based and can miss unusual formats.
 - Claude authentication cannot be verified without an API call; `doctor` only detects
   credentials heuristically.
-- `PowerShell(...)` rules are passed through to Claude Code but have not been verified
-  against a Windows Claude Code build yet.
+- Real-CLI behaviour on Windows and macOS (including `PowerShell(...)` rules) is covered by
+  the `Claude smoke` workflow, which only runs when you provide an API key; it has been
+  verified on Linux.
 - One real provider (Claude Code CLI). The provider interface is ready for others.

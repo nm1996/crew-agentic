@@ -8,6 +8,7 @@
 | Python | ≥ 3.12 | `python3 --version` | `uv` can install it: `uv python install 3.12`. |
 | uv | recent | `uv --version` | <https://docs.astral.sh/uv/getting-started/installation/> |
 | Git | ≥ 2.25 | `git --version` | Needed for `git worktree`. |
+| bubblewrap or Docker | optional | `bwrap --version` / `docker info` | Only for `execution.sandbox` (recommended when you configure verification commands). |
 | Claude Code CLI | 2.1.x tested | `claude --version` | Only for the real provider. Install per <https://docs.claude.com/claude-code>, then run `claude` once to log in (or export `ANTHROPIC_API_KEY`). |
 
 CREW verifies all of this for you: `crew doctor`.
@@ -69,7 +70,9 @@ See [CONFIGURATION.md](CONFIGURATION.md).
 
 ### Linux and macOS
 
-Nothing special. Agent process trees run in their own session and are stopped as a group.
+Agent process trees run in their own session and are stopped as a group. For the
+verification sandbox on Linux install bubblewrap (`sudo apt install bubblewrap`, `sudo dnf
+install bubblewrap`); on macOS use `sandbox: docker`.
 
 ### Windows
 
@@ -83,6 +86,8 @@ Nothing special. Agent process trees run in their own session and are stopped as
     -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
   ```
 
+- Agent process trees are placed in Windows Job Objects, so they are always stopped
+  together, also if CREW itself is killed.
 - Prefer the **native Claude Code build** (`claude.exe`). With an npm install
   (`claude.cmd`), CREW runs `node …\@anthropic-ai\claude-code\cli.js` directly, because
   cmd.exe would mangle the arguments; `node` must be on `PATH`.

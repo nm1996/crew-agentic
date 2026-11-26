@@ -27,6 +27,10 @@ execution:
   command_output_limit_bytes: 200000
   preserve_worktrees_on_failure: true
   verification_commands: []     # strings or argv lists, e.g. ["uv run pytest -q", ["npm", "test"]]
+  sandbox: none                 # none | bwrap (Linux) | docker — isolation for verification
+  sandbox_image: null           # docker only, e.g. python:3.12-slim
+  sandbox_network: false        # allow network inside the sandbox
+  sandbox_writable_paths: []    # extra writable paths for bwrap, e.g. ["~/.cache/uv"]
 git:
   branch_prefix: crew           # branches: crew/<run>/integration, crew/<run>/<task>-a<n>
   worktree_directory: .crew/worktrees
@@ -72,9 +76,35 @@ system variables), a timeout and an output limit; output is redacted. A program 
 cannot be started is recorded as exit code 127.
 
 > **Security note:** verification commands run code that agents may have written or
-> changed (test files, `conftest.py`, `package.json` scripts, `Makefile`). Configuring
-> them effectively lets agent-authored code run as your user. See
-> [DECISIONS.md](DECISIONS.md#known-limitations). Their results are the
+> changed (test files, `conftest.py`, `package.json` scripts, `Makefile`). Without a
+> sandbox, that code runs as your user. Enable one:
+
+### Sandboxing verification
+
+```bash
+crew configure execution.sandbox=bwrap                       # Linux, needs bubblewrap
+crew configure execution.sandbox=docker execution.sandbox_image=python:3.12-slim
+```
+
+| | `bwrap` | `docker` |
+|---|---|---|
+| Writable | the worktree, a private `/tmp`, `sandbox_writable_paths` | `/workspace` (the worktree), `/tmp` |
+| Network | off unless `sandbox_network: true` | `--network none` unless `sandbox_network: true` |
+| Your home | readable, credential dirs (`.ssh`, `.aws`, `.config/gh`, `.claude`, …) hidden | not mounted |
+| Toolchain | your host tools | must be inside the image |
+
+If the sandbox is not available when a run reaches verification, the run **fails** (it is
+never silently run unsandboxed); fix it and `crew retry`. `crew doctor` checks it.
+
+Tips:
+
+- With the network off, tools cannot download dependencies. Either set
+  `sandbox_network: true`, or (bwrap) make your package cache writable, e.g.
+  `sandbox_writable_paths: ["~/.cache/uv"]`, and run offline (`UV_OFFLINE=1` is not set
+  for you; use a command such as `["uv", "run", "--offline", "pytest"]`).
+- Ubuntu 24.04+ restricts unprivileged user namespaces; if `doctor` reports that bwrap
+  cannot create a sandbox, allow them (`sysctl kernel.apparmor_restrict_unprivileged_userns=0`)
+  or use Docker. Their results are the
 trustworthy test evidence given to the Reviewer and the External Evaluator and shown in
 reports. A failing command does not stop the run; it becomes evidence.
 

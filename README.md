@@ -19,7 +19,7 @@ crew run "Add health checks to the API"
   complete before you accept the result. These gates cannot be turned off in config.
 - **Safe by construction** – agents only ever run in CREW-owned worktrees; your working
   tree and branch are never modified, stashed, reset or cleaned. Permissions are enforced
-  by CLI flags, not prompts.
+  by CLI flags, not prompts, and test commands can run in a bubblewrap/Docker sandbox.
 - **Observable** – every state transition, agent execution and command is recorded in
   SQLite, with Markdown evidence reports per run.
 - **Recoverable** – kill the process at any point and `crew resume` continues safely;
@@ -33,8 +33,8 @@ Requirements: Linux, macOS or Windows; Python ≥ 3.12; Git ≥ 2.25;
 installed and logged in (not needed for the offline demo).
 
 ```bash
-# install the CLI (from a clone of this repository)
-uv tool install .
+# install the CLI (latest release, or `uv tool install .` from a clone)
+uv tool install https://github.com/nm1996/crew-agentic/releases/download/v0.3.0/crew_cli-0.3.0-py3-none-any.whl
 
 # in the repository you want to work on
 cd ~/code/my-project
@@ -76,7 +76,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Status
 
-`0.2.0` — hardened MVP, tested on Linux, macOS and Windows. Single developer, Claude Code
+`0.3.0` — tested on Linux, macOS and Windows; see the
+[releases](https://github.com/nm1996/crew-agentic/releases). Single developer, Claude Code
 CLI as the only real provider.
 See [docs/ROADMAP.md](docs/ROADMAP.md) and the known limitations in
 [docs/DECISIONS.md](docs/DECISIONS.md#known-limitations).

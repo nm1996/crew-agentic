@@ -36,6 +36,17 @@ uv run --project /path/to/crew crew init --provider fake
 uv run --project /path/to/crew crew run "demo"
 ```
 
+To run them on Linux, macOS and Windows in CI, add the `ANTHROPIC_API_KEY` repository
+secret and start the **Claude smoke** workflow manually (Actions → Claude smoke → Run).
+
+### Releasing
+
+1. Move the `## [Unreleased]` entries in `CHANGELOG.md` under a new `## [X.Y.Z] - date`.
+2. Set `version` in `pyproject.toml` and `src/crew/__init__.py`, run `uv lock`.
+3. Commit (`build: release X.Y.Z`), push, wait for CI to pass.
+4. `git tag -a vX.Y.Z -m "CREW X.Y.Z" && git push origin vX.Y.Z` — the Release workflow
+   builds the wheel/sdist and publishes the GitHub release with the changelog section.
+
 ### Database migrations
 
 Schema changes need an Alembic revision (CREW applies migrations automatically at startup):
