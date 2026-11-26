@@ -1,3 +1,3 @@
 """CREW — local-first AI development orchestration CLI."""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

@@ -30,7 +30,7 @@ def run_id_from(output: str) -> str:
 
 def test_version():
     result = invoke("--version")
-    assert result.exit_code == 0 and "crew 0.2.0" in result.output
+    assert result.exit_code == 0 and "crew 0.3.0" in result.output
 
 
 def test_commands_before_init_exit_with_config_code(in_repo):

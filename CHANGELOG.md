@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-26
+
+### Added
+- `execution.sandbox` (`none` | `bwrap` | `docker`) isolates verification commands, which
+  run agent-written code: read-only filesystem except the worktree, hidden credential
+  directories, no network by default. Fails closed when unavailable; recorded per command;
+  checked by `crew doctor`.
+- Windows Job Objects: agent and verification process trees are always stopped together,
+  including grandchildren of exited parents, and die with CREW.
+- Opt-in real-CLI smoke test for scoped shell rules, and a manually triggered
+  "Claude smoke" workflow for Linux, macOS and Windows (needs `ANTHROPIC_API_KEY`).
+- Tag-driven release workflow publishing the wheel, sdist and changelog notes.
+
+### Changed
+- CI installs bubblewrap so sandbox isolation is tested for real on Linux.
+
 ## [0.2.0] - 2026-11-26
 
 Hardening and cross-platform release, driven by an independent review of 0.1.0.
