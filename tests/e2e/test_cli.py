@@ -91,3 +91,10 @@ def test_doctor_exit_code_reflects_failures(in_repo):
     invoke("init", "--provider", "fake")
     invoke("configure", "provider.claude_code.executable=no-such-claude")
     assert invoke("doctor").exit_code == 0  # fake provider: Claude CLI is only a warning
+
+
+def test_history_never_truncates_run_ids(in_repo, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "60")  # narrow terminal
+    invoke("init", "--provider", "fake")
+    run_id = run_id_from(invoke("run", "a fairly long request " * 5).output)
+    assert run_id in invoke("history").output

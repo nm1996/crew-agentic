@@ -56,6 +56,8 @@ STATE_STYLE = {
     RunState.PLAN_REJECTED: "red",
 }
 
+RUN_ID_WIDTH = len("20261126-130634-d62f")
+
 RunIdArg = Annotated[str, typer.Argument(help="Run id (see `crew history`).")]
 NoteOpt = Annotated[
     str | None, typer.Option("--note", "-m", help="Reason recorded with the decision.")
@@ -355,8 +357,9 @@ def tasks(run_id: RunIdArg) -> None:
     project = open_project()
     project.store.get_run(run_id)
     table = Table(show_header=True, header_style="bold")
-    for col in ("Task", "Cycle", "Status", "Deps", "Attempt", "Commit", "Title"):
-        table.add_column(col)
+    table.add_column("Task", no_wrap=True)
+    for col in ("Cycle", "Status", "Deps", "Attempt", "Commit", "Title"):
+        table.add_column(col, overflow="fold")
     for t in project.store.tasks(run_id):
         table.add_row(
             t.key,
@@ -376,8 +379,11 @@ def history(limit: Annotated[int, typer.Option(help="Number of runs to show.")] 
     """List previous runs."""
     project = open_project()
     table = Table(show_header=True, header_style="bold")
-    for col in ("Run", "Created (UTC)", "State", "Request"):
-        table.add_column(col)
+    # Run ids must stay whole and copy-pasteable, even in narrow terminals.
+    table.add_column("Run", no_wrap=True, min_width=RUN_ID_WIDTH)
+    table.add_column("Created (UTC)", overflow="fold")
+    table.add_column("State", overflow="fold")
+    table.add_column("Request", overflow="fold")
     for r in project.store.list_runs(limit):
         request = r.request if len(r.request) <= 70 else r.request[:67] + "…"
         table.add_row(r.id, f"{r.created_at:%Y-%m-%d %H:%M}", _state(r), request)
