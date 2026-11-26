@@ -1,0 +1,69 @@
+[project]
+name = "crew-cli"
+version = "0.1.0"
+description = "Local-first AI development orchestration CLI: plan, implement, review and evaluate changes with approval gates."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "CREW contributors" }]
+keywords = ["ai", "agents", "orchestration", "cli", "claude", "git"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+]
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+    "pydantic>=2.7",
+    "sqlalchemy>=2.0.30",
+    "alembic>=1.13",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+crew = "crew.cli.app:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/crew"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "claude: opt-in smoke tests against the real Claude Code CLI (set CREW_CLAUDE_SMOKE=1)",
+]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "S", "RUF"]
+ignore = [
+    "S101",   # assert is fine in tests
+    "S603",   # subprocess without shell: we always pass argument lists
+    "S607",   # partial executable paths (git, claude) are resolved deliberately
+    "RUF012", # mutable class attrs on pydantic/sqlalchemy models
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "B011"]
+"src/crew/persistence/migrations/**" = ["E501"]

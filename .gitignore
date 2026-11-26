@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# CREW runtime state when dogfooding CREW on itself
+.crew/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
