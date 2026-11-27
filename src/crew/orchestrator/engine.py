@@ -181,6 +181,7 @@ class Orchestrator:
         )
         self.notify: Notify = notify or (lambda _msg: None)
         self._rate_limited = False
+        self._git_lock: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
         self._handlers: dict[RunState, Callable[[Run], None]] = {
             RunState.CREATED: self._start,
             RunState.ANALYZING: self._analyze,
@@ -653,18 +654,44 @@ class Orchestrator:
                 await asyncio.gather(*running.values(), return_exceptions=True)
             await _stop(broker)
 
+    async def _git[R](self, fn: Callable[..., R], *args: Any) -> R:
+        """Run a blocking git call in a thread, one at a time.
+
+        Off the event loop so other Implementers' agent processes keep streaming;
+        serialized because concurrent git commands in one repository can collide on
+        shared ref and worktree lock files.
+        """
+        loop = asyncio.get_running_loop()
+        if self._git_lock is None or self._git_lock[0] is not loop:
+            self._git_lock = (loop, asyncio.Lock())
+        async with self._git_lock[1]:
+            call = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+            try:
+                return await asyncio.shield(call)
+            except asyncio.CancelledError:
+                # A git command cannot be interrupted halfway; let it finish before
+                # the lock is released so the next one never overlaps it.
+                await asyncio.wait({call})
+                raise
+
     async def _run_task(self, run: Run, task: Task, execution_id: str) -> None:
         ws = self.p.workspace
         try:
             deps = [self.store.get_task(run.id, d) for d in task.dependencies]
-            path, branch = ws.create_task_worktree(
-                run.id, task.key, task.attempt, start_point=ws.integration_branch(run.id)
+            path, branch = await self._git(
+                ws.create_task_worktree,
+                run.id,
+                task.key,
+                task.attempt,
+                ws.integration_branch(run.id),
             )
             wt = self.p.git.at(path)
             for dep in deps:
                 if not dep.branch:
                     continue
-                conflicts = ws.merge_into(path, dep.branch, f"crew: bring in dependency {dep.key}")
+                conflicts = await self._git(
+                    ws.merge_into, path, dep.branch, f"crew: bring in dependency {dep.key}"
+                )
                 if conflicts:
                     await self._resolve_conflict(
                         run,
@@ -674,7 +701,7 @@ class Orchestrator:
                         {d.key: d.report for d in deps},
                         into=f"task {task.key}",
                     )
-            start_commit = wt.head()
+            start_commit = await self._git(wt.head)
             task = self.store.update_task(
                 task.pk, worktree_path=str(path), branch=branch, start_commit=start_commit
             )
@@ -689,9 +716,11 @@ class Orchestrator:
                 execution_id=execution_id,
             )
             report = _expect(report, ImplementationReport)
-            if wt.current_branch() != branch:
+            if await self._git(wt.current_branch) != branch:
                 raise PreconditionError(f"agent left branch {branch}; refusing to record result")
-            commit = wt.commit_all(f"crew({task.key}): {task.title}\n\nCREW run {run.id}")
+            commit = await self._git(
+                wt.commit_all, f"crew({task.key}): {task.title}\n\nCREW run {run.id}"
+            )
             if commit.excluded:
                 self.store.add_event(
                     run.id,
@@ -701,10 +730,10 @@ class Orchestrator:
                     task_key=task.key,
                 )
                 self.notify(f"[warning] {task.key}: not committed: {', '.join(commit.excluded)}")
-            head = wt.head()
+            head = await self._git(wt.head)
             if not head or not start_commit:
                 raise CrewError(f"could not determine commits for task {task.key}")
-            changed = wt.changed_files(start_commit, head)
+            changed = await self._git(wt.changed_files, start_commit, head)
             if not changed:
                 self.store.add_event(
                     run.id, "task_no_changes", "task produced no changes", task_key=task.key
@@ -892,7 +921,7 @@ class Orchestrator:
         summary = f"merging {ref} into {into} conflicted in: {', '.join(files)}"
         self.store.add_event(run.id, "merge_conflict", summary, data={"files": files})
         if self.config.execution.conflict_resolution == "fail":
-            wt.merge_abort()
+            await self._git(wt.merge_abort)
             raise MergeConflictError(
                 f"{summary}. Worktrees and branches were preserved under "
                 f"{self.p.workspace.run_dir(run.id)}.",
@@ -908,24 +937,24 @@ class Orchestrator:
                 cycle=run.correction_cycle,
             )
         except CrewError as exc:
-            wt.merge_abort()
+            await self._git(wt.merge_abort)
             raise MergeConflictError(f"{summary}; the resolver failed: {exc.message}") from exc
-        stray = sorted(set(wt.unstaged_changes()) - set(files))
+        stray = sorted(set(await self._git(wt.unstaged_changes)) - set(files))
         if stray:
             # Committing only the conflicted files would leave these changes behind,
             # uncommitted, in the worktree that later merges and tests run in.
-            wt.merge_abort()
+            await self._git(wt.merge_abort)
             raise MergeConflictError(
                 f"{summary}; the resolver also changed files outside the conflict: "
                 f"{', '.join(stray)}. The worktree {path} was preserved for inspection."
             )
-        remaining = wt.files_with_conflict_markers(files)
+        remaining = await self._git(wt.files_with_conflict_markers, files)
         if remaining:
-            wt.merge_abort()
+            await self._git(wt.merge_abort)
             raise MergeConflictError(
                 f"{summary}; conflict markers remain in: {', '.join(remaining)}"
             )
-        head = wt.conclude_merge(files)
+        head = await self._git(wt.conclude_merge, files)
         self.store.add_event(
             run.id, "merge_conflict_resolved", f"{ref} into {into} ({(head or '')[:10]})"
         )
