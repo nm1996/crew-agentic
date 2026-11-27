@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `execution.skip_evaluation_max_lines`: skip the External Evaluator for small changes
+  whose verification commands all passed and that have no blocking findings (D26).
+
+### Changed
+- Git commands of parallel tasks run off the event loop, so one task's merge or commit no
+  longer stalls the other Implementer (D26).
+
 ## [0.6.0] - 2026-11-27
 
 ### Added

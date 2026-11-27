@@ -1089,7 +1089,39 @@ class Orchestrator:
             correction_cycle=cycle,
         )
 
+    def _evaluation_skip_reason(self, run: Run) -> str | None:
+        limit = self.config.execution.skip_evaluation_max_lines
+        if limit is None:
+            return None
+        commands = self._cycle_commands(run)
+        if not commands or any(c.exit_code != 0 or c.timed_out for c in commands):
+            return None
+        if any(e.type == "correction_limit_reached" for e in self.store.events(run.id)):
+            return None
+        lines = self.p.git.changed_lines(
+            run.base_commit, self.p.workspace.integration_branch(run.id)
+        )
+        if lines > limit:
+            return None
+        return (
+            f"{lines} changed line(s) (limit {limit}), {len(commands)} verification "
+            "command(s) passed, no blocking review findings"
+        )
+
     def _evaluate(self, run: Run) -> None:
+        if reason := self._evaluation_skip_reason(run):
+            self.store.add_event(run.id, "evaluation_skipped", reason)
+            renderer.write_artifact(
+                self.store,
+                self._run_dir(run),
+                run.id,
+                "external-evaluation.md",
+                "# External evaluation\n\n_Skipped (`execution.skip_evaluation_max_lines`): "
+                f"{reason}._\n",
+            )
+            self.notify(f"External evaluation skipped: {reason}")
+            self._transition(run.id, RunState.AWAITING_FINAL_APPROVAL, "evaluation skipped")
+            return
         self.notify("External Evaluator is assessing the result…")
         reviews = [
             e.output

@@ -127,6 +127,10 @@ class ExecutionSettings(_Strict):
     # "full" embeds the whole diff; "summary" embeds stats, the file list and the
     # first part of the patch, and they open files with their Read tool.
     review_context: Literal["full", "summary"] = "full"
+    # Skip the External Evaluator when the integrated change has at most this many
+    # added+removed lines, at least one verification command ran and all passed, and
+    # no blocking review finding is left. None (default) = always evaluate.
+    skip_evaluation_max_lines: int | None = Field(default=None, ge=1)
     # Isolation for verification commands; see crew/security/sandbox.py.
     sandbox: Literal["none", "bwrap", "docker"] = "none"
     sandbox_image: str | None = None  # required for docker

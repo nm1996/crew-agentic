@@ -341,6 +341,21 @@ per task. Controls added in 0.4.0:
   conflicted files, so those changes would otherwise stay uncommitted in the worktree
   that later merges and verification commands run in. The worktree is preserved.
 
+## D26. Throughput and cost of parallel runs
+
+- **Git off the event loop.** Task worktree creation, dependency merges, commits and
+  conflict checks run in a thread (`asyncio.to_thread`) so the other Implementer's agent
+  process keeps streaming meanwhile. They are serialized by one lock: concurrent git
+  commands in one repository can fail on shared ref/worktree lock files. A cancelled task
+  waits for its running git command before the lock is released.
+- **Optional evaluation skip.** `execution.skip_evaluation_max_lines` skips the External
+  Evaluator only when the integrated change is at most that many added+removed lines, at
+  least one verification command ran in the cycle and all passed, and no
+  `correction_limit_reached` event exists. The run still passes through
+  `EXTERNAL_EVALUATION` (no state-machine change), the skip is an event, and both
+  `external-evaluation.md` and the final report say why. Off by default: the Evaluator is
+  advisory, the developer's final gate is unchanged.
+
 ## Releases
 
 Version tags `vX.Y.Z` trigger `.github/workflows/release.yml`: the tag must equal the

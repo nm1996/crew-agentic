@@ -30,6 +30,7 @@ execution:
   preserve_worktrees_on_failure: true
   verification_commands: []     # strings or argv lists, e.g. ["uv run pytest -q", ["npm", "test"]]
   review_context: full          # full | summary — how much diff Reviewer/Evaluator get inline
+  skip_evaluation_max_lines: null  # e.g. 40: skip the Evaluator on small, green, unblocked changes
   conflict_resolution: agent    # agent | fail — resolve merge conflicts with an Implementer
   serialize_shared_files: true  # tasks sharing an expected file never run in parallel (D25)
   sandbox: none                 # none | bwrap (Linux) | docker — isolation for verification

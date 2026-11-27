@@ -207,6 +207,15 @@ class Git:
     def changed_files(self, base: str, head: str = "HEAD") -> list[str]:
         return _split_z(self.run("diff", "--name-only", "-z", f"{base}...{head}"))
 
+    def changed_lines(self, base: str, head: str = "HEAD") -> int:
+        """Added plus removed lines between ``base`` and ``head`` (binary files count 0)."""
+        total = 0
+        for line in self.run("diff", "--numstat", f"{base}...{head}").splitlines():
+            added, removed = line.split("\t")[:2]
+            total += int(added) if added.isdigit() else 0
+            total += int(removed) if removed.isdigit() else 0
+        return total
+
     def diff(self, base: str, head: str = "HEAD") -> str:
         return self.run("diff", "--stat", "--patch", f"{base}...{head}")
 

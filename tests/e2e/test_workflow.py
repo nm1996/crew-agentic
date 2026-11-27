@@ -861,3 +861,37 @@ def test_permission_prompts_off_by_default(make_orch, fake):
     orch = make_orch()
     orch.approve_plan(orch.start_run("x").id)
     assert all(c.permission_dir is None for c in fake.calls)
+
+
+def test_small_green_change_skips_the_evaluator(make_orch, configure_project, fake):
+    project = configure_project(
+        execution={
+            "verification_commands": [[sys.executable, "-V"]],
+            "skip_evaluation_max_lines": 1000,
+        }
+    )
+    orch = make_orch(project, fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL, run.failure_reason
+    assert not any(c.role is Role.EVALUATOR for c in fake.calls)
+    report = (orch.p.paths.run_dir(run.id) / "final-report.md").read_text()
+    assert "_Skipped: " in report and "verification command(s) passed" in report
+
+
+@pytest.mark.parametrize(
+    "execution",
+    [
+        {"skip_evaluation_max_lines": 1000},  # no test evidence
+        {"skip_evaluation_max_lines": 1, "verification_commands": [[sys.executable, "-V"]]},
+        {
+            "skip_evaluation_max_lines": 1000,
+            "verification_commands": [[sys.executable, "-c", "raise SystemExit(1)"]],
+        },
+    ],
+)
+def test_evaluator_runs_unless_every_skip_condition_holds(
+    make_orch, configure_project, fake, execution
+):
+    orch = make_orch(configure_project(execution=execution), fake)
+    orch.approve_plan(orch.start_run("x").id)
+    assert any(c.role is Role.EVALUATOR for c in fake.calls)

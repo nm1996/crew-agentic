@@ -306,7 +306,10 @@ def render_final_report(store: Store, run: Run) -> str:
         lines += [f"**{evaluation['recommendation']}** — {evaluation.get('explanation', '')}"]
         lines += ["", "Unresolved risks:", *_bullets(evaluation.get("unresolved_risks"))]
     else:
-        lines.append("_Not performed._")
+        skipped = next(
+            (e.message for e in store.events(run.id) if e.type == "evaluation_skipped"), None
+        )
+        lines.append(f"_Skipped: {skipped}._" if skipped else "_Not performed._")
 
     lines += ["", "## Agent usage", "", render_usage(executions)]
 
