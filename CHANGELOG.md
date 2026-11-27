@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-27
+
 ### Added
 - GitLab code host (`integrations.code_host.kind: gitlab`, gitlab.com or self-managed):
   `crew publish --pr` opens a merge request, `--review` posts notes, `--pr-comments` reads

@@ -37,7 +37,7 @@ installed and logged in (not needed for the offline demo).
 
 ```bash
 # install the CLI (latest release, or `uv tool install .` from a clone)
-uv tool install https://github.com/nm1996/crew-agentic/releases/download/v0.6.0/crew_cli-0.6.0-py3-none-any.whl
+uv tool install https://github.com/nm1996/crew-agentic/releases/download/v0.7.0/crew_cli-0.7.0-py3-none-any.whl
 
 # in the repository you want to work on
 cd ~/code/my-project
@@ -55,7 +55,7 @@ git merge --no-ff crew/<run-id>/integration   # you merge, when you choose to
 
 Try it offline with the deterministic fake provider: `crew init --provider fake`.
 
-Working with Jira, GitHub or Confluence? `crew run --issue PROJ-123`, then
+Working with Jira, GitHub, GitLab or Confluence? `crew run --issue PROJ-123`, then
 `crew publish <run-id> --pr` — see [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
 
 ## Documentation
@@ -84,7 +84,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Status
 
-`0.6.0` — tested on Linux, macOS and Windows; see the
+`0.7.0` — tested on Linux, macOS and Windows; see the
 [releases](https://github.com/nm1996/crew-agentic/releases). Single developer, Claude Code
 CLI as the only real provider.
 See [docs/ROADMAP.md](docs/ROADMAP.md) and the known limitations in
