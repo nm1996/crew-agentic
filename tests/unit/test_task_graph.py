@@ -2,7 +2,7 @@ import pytest
 
 from crew.domain.enums import TaskStatus
 from crew.domain.errors import PlanValidationError
-from crew.domain.task_graph import Node, is_blocked, is_ready, validate_graph
+from crew.domain.task_graph import Node, is_blocked, is_ready, order_shared_files, validate_graph
 
 
 def test_topological_order_respects_dependencies():
@@ -42,3 +42,25 @@ def test_blocked_when_a_dependency_failed():
 def test_reserved_prefix_is_rejected():
     with pytest.raises(PlanValidationError, match="reserved prefix"):
         validate_graph([Node("crew-fix-1", ())])
+
+
+def test_tasks_sharing_a_file_are_chained_nearest_first():
+    order = ["a", "b", "c", "d"]
+    deps = {"a": [], "b": [], "c": [], "d": []}
+    files = {"a": ["pom.xml", "A.java"], "b": ["./pom.xml"], "c": ["pom.xml"], "d": ["D.java"]}
+    assert order_shared_files(order, deps, files) == {
+        "b": {"a": ["pom.xml"]},
+        "c": {"b": ["pom.xml"]},  # a is reached through b
+    }
+
+
+def test_existing_ordering_and_directories():
+    order = ["a", "b", "c"]
+    deps = {"a": [], "b": ["a"], "c": []}
+    files = {"a": ["src/api/"], "b": ["src/api/routes.py"], "c": ["src/api/routes.py"]}
+    # b already depends on a; c overlaps b (file) and a (directory) but needs only b.
+    assert order_shared_files(order, deps, files) == {"c": {"b": ["src/api/routes.py"]}}
+
+
+def test_no_shared_files_adds_nothing():
+    assert order_shared_files(["a", "b"], {}, {"a": ["x.py"], "b": ["xy.py"]}) == {}

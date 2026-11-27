@@ -53,6 +53,7 @@ from crew.domain.task_graph import (
     Node,
     is_blocked,
     is_ready,
+    order_shared_files,
     topological_order,
     validate_graph,
 )
@@ -517,6 +518,23 @@ class Orchestrator:
         else:
             raise PlanValidationError(f"Director could not produce a valid plan: {error}")
 
+        added: dict[str, dict[str, list[str]]] = {}
+        if self.config.execution.serialize_shared_files:
+            added = order_shared_files(
+                order,
+                {t.id: t.dependencies for t in plan.tasks},
+                {t.id: t.expected_files for t in plan.tasks},
+            )
+        for t in plan.tasks:
+            for dep, shared in added.get(t.id, {}).items():
+                t.dependencies.append(dep)
+                self.store.add_event(
+                    run.id,
+                    "plan_serialized",
+                    f"{t.id} now depends on {dep}: both change {', '.join(shared)}",
+                    task_key=t.id,
+                    data={"dependency": dep, "files": shared},
+                )
         position = {task_id: i for i, task_id in enumerate(order)}
         tasks = [
             Task(
@@ -535,6 +553,9 @@ class Orchestrator:
             for t in plan.tasks
         ]
         plan_dict = plan.model_dump(mode="json")
+        for t in plan_dict["tasks"]:
+            if t["id"] in added:
+                t["crew_added_dependencies"] = added[t["id"]]
         renderer.write_artifact(
             self.store, self._run_dir(run), run.id, "plan.md", renderer.render_plan(plan_dict)
         )
@@ -781,6 +802,33 @@ class Orchestrator:
             conflicts = ws.merge_into(
                 path, task.branch, f"crew: integrate {task.key} — {task.title}"
             )
+            container = None
+            if conflicts:
+                container = next(
+                    (
+                        other.key
+                        for other in tasks.values()
+                        if other.key != key
+                        and other.status == TaskStatus.COMPLETED
+                        and other.commit_sha
+                        and igit.is_ancestor(task.commit_sha, other.commit_sha)
+                    ),
+                    None,
+                )
+            if container:
+                # A later task already merged this branch and resolved the conflict in
+                # its own worktree; integrating that task brings both in, so the same
+                # conflict is not resolved twice (possibly differently).
+                igit.merge_abort()
+                self.store.add_event(
+                    run.id,
+                    "integration_deferred",
+                    f"{task.key} conflicts here; it is integrated through {container}, "
+                    "which already contains it",
+                    task_key=task.key,
+                    data={"files": conflicts, "via": container},
+                )
+                continue
             if conflicts:
                 integrated = {t.key: t.report for t in tasks.values() if t.integrated}
                 self._run_cancellable(
@@ -796,6 +844,15 @@ class Orchestrator:
                 )
             self.store.update_task(task.pk, integrated=True)
             self.store.add_event(run.id, "task_integrated", task.branch, task_key=task.key)
+        for task in self.store.tasks(run.id, cycle=run.correction_cycle):
+            if task.integrated or task.status != TaskStatus.COMPLETED or not task.commit_sha:
+                continue
+            if not igit.is_ancestor(task.commit_sha, "HEAD"):
+                raise CrewError(f"task {task.key} was deferred but never reached integration")
+            self.store.update_task(task.pk, integrated=True)
+            self.store.add_event(
+                run.id, "task_integrated", f"{task.branch} (via a later task)", task_key=task.key
+            )
         self.notify("Integration complete; running verification commands…")
         self._run_cancellable(run.id, self._verify(run, path))
         renderer.write_artifact(
@@ -853,6 +910,15 @@ class Orchestrator:
         except CrewError as exc:
             wt.merge_abort()
             raise MergeConflictError(f"{summary}; the resolver failed: {exc.message}") from exc
+        stray = sorted(set(wt.unstaged_changes()) - set(files))
+        if stray:
+            # Committing only the conflicted files would leave these changes behind,
+            # uncommitted, in the worktree that later merges and tests run in.
+            wt.merge_abort()
+            raise MergeConflictError(
+                f"{summary}; the resolver also changed files outside the conflict: "
+                f"{', '.join(stray)}. The worktree {path} was preserved for inspection."
+            )
         remaining = wt.files_with_conflict_markers(files)
         if remaining:
             wt.merge_abort()

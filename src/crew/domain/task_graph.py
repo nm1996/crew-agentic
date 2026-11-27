@@ -72,6 +72,54 @@ def topological_order(deps: Mapping[str, Iterable[str]]) -> list[str] | None:
     return order
 
 
+def _norm_path(path: str) -> str:
+    path = path.strip().replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    return path.rstrip("/")
+
+
+def _overlap(a: Iterable[str], b: Iterable[str]) -> list[str]:
+    """Paths of ``a`` that equal, contain or lie inside a path of ``b``."""
+    bs = {p for p in map(_norm_path, b) if p}
+    shared = []
+    for p in {_norm_path(x) for x in a} - {""}:
+        if any(p == q or p.startswith(q + "/") or q.startswith(p + "/") for q in bs):
+            shared.append(p)
+    return sorted(shared)
+
+
+def order_shared_files(
+    order: Sequence[str],
+    dependencies: Mapping[str, Iterable[str]],
+    files: Mapping[str, Iterable[str]],
+) -> dict[str, dict[str, list[str]]]:
+    """Dependencies to add so that no two tasks sharing a file can run in parallel.
+
+    ``order`` is a topological order of the graph. For every task, each earlier
+    task that touches a shared expected file and is not already an ancestor
+    becomes a dependency (nearest first, so overlapping tasks form a chain).
+    Edges only ever point to earlier tasks, so the graph stays acyclic.
+
+    Returns ``{task: {added_dependency: [shared files]}}``.
+    """
+    ancestors: dict[str, set[str]] = {}
+    added: dict[str, dict[str, list[str]]] = {}
+    for j, task in enumerate(order):
+        anc: set[str] = set()
+        for dep in dependencies.get(task, ()):
+            anc |= {dep} | ancestors.get(dep, set())
+        for earlier in reversed(order[:j]):
+            if earlier in anc:
+                continue
+            shared = _overlap(files.get(task, ()), files.get(earlier, ()))
+            if shared:
+                added.setdefault(task, {})[earlier] = shared
+                anc |= {earlier} | ancestors[earlier]
+        ancestors[task] = anc
+    return added
+
+
 def is_ready(dependencies: Iterable[str], statuses: Mapping[str, TaskStatus]) -> bool:
     """A task is READY only when every dependency is COMPLETED."""
     return all(statuses.get(dep) is TaskStatus.COMPLETED for dep in dependencies)

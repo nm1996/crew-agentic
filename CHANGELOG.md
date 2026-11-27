@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `execution.serialize_shared_files` (default on): planned tasks whose expected files
+  overlap get a dependency on each other, so they never run in parallel on the same file.
+  The added ordering is shown in `plan.md` before approval (D25).
+- The Director is asked to list shared files (build manifests, routers, changelogs) in
+  `expected_files`.
+
+### Fixed
+- In a diamond (`c` depends on `a` and `b`), a conflict between `a` and `b` was resolved
+  in `c`'s worktree and then again at integration; the branch now arrives through `c`.
+- A `=======` Markdown heading underline in a conflicted file was taken for a leftover
+  conflict marker and failed the run.
+- Files the conflict resolver changed outside the conflict were left uncommitted in the
+  worktree; the resolution is now rejected instead.
+
 ## [0.5.1] - 2026-11-26
 
 ### Added
