@@ -4,7 +4,7 @@ You are working on **CREW**, a Python local-first AI development orchestration C
 
 ## Current state
 
-The MVP (M0–M6 in `docs/ROADMAP.md`) is implemented. Commands:
+M0–M9 in `docs/ROADMAP.md` are implemented (MVP, hardening, sandboxing, cost controls, integrations); see `CHANGELOG.md` for the current version. Commands:
 
 ```bash
 uv sync --dev

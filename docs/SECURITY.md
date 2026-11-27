@@ -80,7 +80,7 @@ Document residual risks rather than claiming perfect isolation. A Git worktree i
 
 | Safeguard | Where it is enforced | Test |
 |---|---|---|
-| No push/merge/deploy | `workspace/git.py` refuses network and destructive git outside CREW worktrees; CREW only merges into `crew/<run>/integration` | `tests/integration/test_workspace.py`, `tests/e2e/test_workflow.py::test_full_run_reaches_completion_without_touching_user_branch` |
+| No push/merge/deploy | `workspace/git.py` refuses network and destructive git (the one exception is `push_owned_branch` for `crew publish`, below); CREW only merges into `crew/<run>/integration` | `tests/integration/test_workspace.py`, `tests/e2e/test_workflow.py::test_full_run_reaches_completion_without_touching_user_branch` |
 | No implementation before plan approval | state machine has no path around `AWAITING_PLAN_APPROVAL`; engine stops at gates | `tests/unit/test_state_machine.py`, `test_plan_rejection_never_implements` |
 | No completion before final approval | only `crew accept` performs `AWAITING_FINAL_APPROVAL → COMPLETED` | `test_final_completion_requires_explicit_accept` |
 | Gates cannot be disabled | `approvals.*` typed `Literal[True]` | `tests/unit/test_config.py` |

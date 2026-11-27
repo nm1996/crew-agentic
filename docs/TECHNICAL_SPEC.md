@@ -39,6 +39,8 @@ Initial commands:
 - `crew accept <run-id>` / `crew reject <run-id>` (final gate; added during implementation)
 - `crew history`
 - `crew retry <run-id>` and `crew cleanup <run-id>|--all [--branches]` (added in 0.2.0)
+- `crew configure [key=value ...]` (show or set validated configuration)
+- `crew run --issue/--doc/--pr-comments/--file` and `crew publish <run-id>` (added in 0.5.0, see [INTEGRATIONS.md](INTEGRATIONS.md))
 
 Exit codes are documented in [USAGE.md](USAGE.md#exit-codes) and `src/crew/cli/app.py`.
 
@@ -140,7 +142,7 @@ Do not store API keys, environment dumps, or raw secret-bearing process environm
 - Detect overlapping file modifications and merge conflicts.
 - Preserve failed/conflicted worktrees for inspection.
 - Never run destructive cleanup commands against user-owned paths.
-- Never push, merge to the user's branch, or deploy automatically.
+- Never push, merge to the user's branch, or deploy automatically. The only push is the explicit `crew publish --pr`, limited to the run's integration branch (D23).
 
 The exact integration strategy (merge commits versus cherry-pick) must be selected and documented during implementation. Prefer the simplest strategy that preserves task provenance and handles conflicts safely.
 

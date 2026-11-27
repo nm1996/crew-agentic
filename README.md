@@ -12,13 +12,15 @@ crew run "Add health checks to the API"
    ├─ CREW integrates task branches + runs your test commands
    ├─ Reviewer finds defects ─────► bounded correction cycles
    ├─ External Evaluator checks the result against your original request
-   └─ you accept or reject ───────► CREW never merges, pushes or deploys for you
+   └─ you accept or reject ───────► you merge; CREW pushes only on `crew publish`
 ```
 
 - **Human-controlled** – nothing is implemented before you approve the plan, nothing is
   complete before you accept the result. These gates cannot be turned off in config.
 - **Safe by construction** – agents only ever run in CREW-owned worktrees; your working
-  tree and branch are never modified, stashed, reset or cleaned. Permissions are enforced
+  tree and branch are never modified, stashed, reset or cleaned. CREW never merges into
+  your branch or deploys; its only push is the run's integration branch, when you run
+  `crew publish`. Permissions are enforced
   by CLI flags, not prompts, and test commands can run in a bubblewrap/Docker sandbox.
 - **Observable** – every state transition, agent execution and command is recorded in
   SQLite, with Markdown evidence reports per run.

@@ -14,6 +14,9 @@ Build in vertical slices. Keep the application runnable at every milestone.
 | M5 Review and evaluation | Done | Structured findings, bounded corrections, independent evaluator, final gate, reports. |
 | M6 Recovery and hardening | Done (0.1.0) | Resume/reconcile, cancellation, orphan handling, redaction tests, e2e tests, docs. |
 | M7 Hardening and cross-platform | Done (0.2.0) | See below. |
+| M8 Sandboxing, Windows trees, releases | Done (0.3.0) | See below. |
+| Cost controls | Done (0.4.0) | Cost profiles, per-role models, summary review context, conflict resolution (D21–D22). |
+| M9 Permissions and integrations | Done (0.5.0) | See below. |
 
 ## M7 — Hardening and cross-platform (0.2.0)
 
@@ -80,7 +83,7 @@ A small adapter interface per integration kind, next to `AgentProvider`, configu
 | Kind | Interface (sketch) | First adapters |
 |---|---|---|
 | Issue tracker | `fetch_issue(key) -> Issue`, `comment(key, text)`, `transition(key, state)` | Jira (REST v3) |
-| Code host | `push_branch(branch)`, `open_pull_request(branch, title, body) -> url` | GitHub (`gh`), GitLab |
+| Code host | `push_branch(branch)`, `open_pull_request(branch, title, body) -> url` | GitHub (REST; token from env or `gh auth token`), GitLab |
 | Code review | `fetch_review_comments(pr) -> [Comment]`, `post_review(pr, findings)` | GitHub reviews |
 | Documentation | `fetch_page(ref) -> Markdown`, `publish_page(space, title, markdown)` | Confluence (REST), local Markdown folder |
 
@@ -111,7 +114,7 @@ integration tests, 25/25 independent API checks. Findings that feed back into CR
 - **Optional runtime check:** a configurable "start and probe" verification step (e.g.
   start the service, wait for a port, run a probe command), so the Evaluator does not
   have to mark startup as unverifiable.
-- Fixed during the run: run ids were truncated in `crew history` (0.3.1).
+- Fixed during the run: run ids were truncated in `crew history` (0.4.0).
 
 ## M10 — Candidates
 
