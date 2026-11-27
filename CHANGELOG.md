@@ -14,6 +14,8 @@ All notable changes to this project are documented here. The format follows
   Director is told about the fixed per-task cost and not to over-split (D26).
 
 ### Changed
+- `orchestrator/engine.py` (≈1,400 lines) is split into stage modules: `implementation`,
+  `integration`, `review`, `permissions` and `support`; behaviour is unchanged.
 - Git commands of parallel tasks run off the event loop, so one task's merge or commit no
   longer stalls the other Implementer (D26).
 

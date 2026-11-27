@@ -624,7 +624,7 @@ def test_verification_runs_inside_the_sandbox(make_orch, configure_project):
 
 
 def test_unavailable_sandbox_fails_closed(make_orch, configure_project, monkeypatch):
-    monkeypatch.setattr("crew.orchestrator.engine.check_sandbox", lambda _s: "not installed")
+    monkeypatch.setattr("crew.orchestrator.integration.check_sandbox", lambda _s: "not installed")
     project = configure_project(
         execution={"verification_commands": [[sys.executable, "-V"]], "sandbox": "bwrap"}
     )

@@ -159,7 +159,12 @@ src/crew/
   domain/enums.py, errors.py  states, statuses, roles, error hierarchy (exit codes)
   domain/task_graph.py        DAG validation, readiness/blocking rules
   orchestrator/state_machine.py  allowed transitions (pure)
-  orchestrator/engine.py      Orchestrator: stage handlers, scheduler, gates, cancellation
+  orchestrator/engine.py      Orchestrator: use cases, driver loop, planning, gates, cancellation
+  orchestrator/implementation.py  IMPLEMENTING: scheduler, task worktrees, Implementer runs
+  orchestrator/integration.py     INTEGRATING: merges, conflict resolution, verification
+  orchestrator/review.py          REVIEWING, CHANGES_REQUESTED, EXTERNAL_EVALUATION
+  orchestrator/permissions.py     permission broker for `approvals.permission_prompts: ask`
+  orchestrator/support.py         Project, shared constants and helpers
   orchestrator/recovery.py    reconciliation before resume
   orchestrator/lock.py        per-run driver lock (portable, see system/locking.py)
   agents/contracts.py         Pydantic output schemas per role
@@ -189,9 +194,10 @@ src/crew/
   system/winjob.py            Windows Job Objects (kill-on-close agent trees)
 ```
 
-The scheduler lives inside `engine.py` (`_implement_async`) because it is ~50 lines and
-tightly coupled to task execution; the pure readiness rules it uses are in
-`domain/task_graph.py`. Application use cases that drive runs are methods on
+The stage modules are mixins of the one `Orchestrator` class (they share its store,
+config, runtime and helpers), split out of `engine.py` only to keep each stage readable.
+The scheduler (`implementation.py`, `_implement_async`) is tightly coupled to task
+execution; the pure readiness rules it uses are in `domain/task_graph.py`. Application use cases that drive runs are methods on
 `Orchestrator`; the CLI calls them through `application/project.py`.
 
 ## 5. Data flow
