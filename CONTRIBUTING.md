@@ -46,6 +46,8 @@ secret and start the **Claude smoke** workflow manually (Actions → Claude smok
 3. Commit (`build: release X.Y.Z`), push, wait for CI to pass.
 4. `git tag -a vX.Y.Z -m "CREW X.Y.Z" && git push origin vX.Y.Z` — the Release workflow
    builds the wheel/sdist and publishes the GitHub release with the changelog section.
+   Without a local tag push (e.g. from a phone), run **Actions → Release → Run workflow**
+   on `main` instead: it tags that commit `vX.Y.Z` and publishes the same release.
 
 ### Database migrations
 
