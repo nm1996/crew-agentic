@@ -173,7 +173,7 @@ def test_review_findings_with_a_line_become_inline_comments(make_orch, configure
             "blocking": False,
         }
         return {
-            "assessment": "fine",
+            "assessment": "Looks fine overall.",
             "findings": [
                 {
                     **finding,
