@@ -31,6 +31,7 @@ execution:
   verification_commands: []     # strings or argv lists, e.g. ["uv run pytest -q", ["npm", "test"]]
   review_context: full          # full | summary — how much diff Reviewer/Evaluator get inline
   conflict_resolution: agent    # agent | fail — resolve merge conflicts with an Implementer
+  serialize_shared_files: true  # tasks sharing an expected file never run in parallel (D25)
   sandbox: none                 # none | bwrap (Linux) | docker — isolation for verification
   sandbox_image: null           # docker only, e.g. python:3.12-slim
   sandbox_network: false        # allow network inside the sandbox

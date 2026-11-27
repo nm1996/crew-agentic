@@ -35,6 +35,12 @@ GitRecorder = Callable[[list[str], Path, int, str], None]
 
 # Write commands that may run from the developer's repository root.
 _ROOT_WRITE_ALLOWED = frozenset({"worktree"})
+_CONFLICT_MARKERS = ("<<<<<<< ", ">>>>>>> ", "||||||| ")
+
+
+def _count_separators(lines: list[str]) -> int:
+    return sum(1 for line in lines if line.rstrip() == "=======")
+
 
 # Files larger than this that an agent newly creates are not committed.
 MAX_NEW_FILE_BYTES = 10 * 1024 * 1024
@@ -272,19 +278,34 @@ class Git:
         self.run("merge", "--abort")
 
     def files_with_conflict_markers(self, files: list[str]) -> list[str]:
-        """Files that still contain merge conflict markers."""
+        """Files that still contain merge conflict markers.
+
+        Start, end and diff3 base markers always count. A bare ``=======`` line is
+        also a Markdown/reST heading underline, so it counts only when the file has
+        more of them than either side of the merge had.
+        """
         remaining = []
         for name in files:
             path = self.cwd / name
             if not path.is_file():
                 continue
-            text = path.read_text(encoding="utf-8", errors="replace")
-            if any(
-                line.startswith(("<<<<<<< ", ">>>>>>> ")) or line.rstrip() == "======="
-                for line in text.splitlines()
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            if any(line.startswith(_CONFLICT_MARKERS) for line in lines):
+                remaining.append(name)
+                continue
+            separators = _count_separators(lines)
+            if separators and separators > max(
+                _count_separators(self.run("show", f":{stage}:{name}", check=False).splitlines())
+                for stage in (2, 3)
             ):
                 remaining.append(name)
         return remaining
+
+    def unstaged_changes(self) -> list[str]:
+        """Tracked files changed since the index, plus untracked (non-ignored) files."""
+        changed = _split_z(self.run("diff", "--name-only", "-z"))
+        untracked = _split_z(self.run("ls-files", "--others", "--exclude-standard", "-z"))
+        return sorted(set(changed) | set(untracked))
 
     def conclude_merge(self, files: list[str]) -> str | None:
         """Stage resolved files and create the merge commit. Returns the new HEAD."""

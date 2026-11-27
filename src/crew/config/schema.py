@@ -120,6 +120,9 @@ class ExecutionSettings(_Strict):
     # What to do when merging task branches conflicts: "agent" asks an Implementer
     # to resolve the conflict markers (CREW verifies and commits); "fail" stops.
     conflict_resolution: Literal["agent", "fail"] = "agent"
+    # Planned tasks whose expected files overlap get a dependency on each other, so
+    # they never run in parallel on the same file (the usual cause of conflicts).
+    serialize_shared_files: bool = True
     # How much of the integrated diff Reviewer and Evaluator get in their prompt:
     # "full" embeds the whole diff; "summary" embeds stats, the file list and the
     # first part of the patch, and they open files with their Read tool.

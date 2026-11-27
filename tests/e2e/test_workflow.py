@@ -687,6 +687,85 @@ def test_dependency_conflict_is_resolved_by_an_agent(make_orch):
     assert "merge_conflict" in events and "merge_conflict_resolved" in events
     content = git(orch.p.paths.root, "show", f"{run.integration_branch}:app.py")
     assert content.count("PLUGIN = 'failsafe'") == 1 and "<<<<<<<" not in content
+    # c already resolved a/b; integration brings b in through c instead of resolving again.
+    assert events.count("merge_conflict") == 1
+    deferred = [e for e in orch.store.events(run.id) if e.type == "integration_deferred"]
+    assert [e.task_key for e in deferred] == ["b"]
+    assert all(t.integrated for t in orch.store.tasks(run.id))
+
+
+def _plan_sharing(*tasks: tuple[str, list[str], list[str]]):
+    def director(req: AgentRequest) -> dict:
+        plan = plan_with(*[(k, d) for k, d, _ in tasks])(req)
+        for task, (_, _, files) in zip(plan["tasks"], tasks, strict=True):
+            task["expected_files"] = files
+        return plan
+
+    return director
+
+
+def test_tasks_sharing_a_file_do_not_run_in_parallel(make_orch):
+    fake = FakeProvider()
+    fake.on(Role.DIRECTOR, _plan_sharing(("a", [], ["app.py"]), ("b", [], ["app.py"])))
+    fake.on(Role.IMPLEMENTER, _same_change_with_different_comments)
+    orch = make_orch(provider=fake)
+    run = orch.start_run("x")
+    assert orch.store.get_task(run.id, "b").dependencies == ["a"]
+    plan_md = (orch.p.paths.run_dir(run.id) / "plan.md").read_text()
+    assert "*Ordered by CREW after `a`:* both change app.py" in plan_md
+    run = orch.approve_plan(run.id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL, run.failure_reason
+    assert "merge_conflict" not in [e.type for e in orch.store.events(run.id)]
+
+
+def test_shared_file_ordering_can_be_disabled(make_orch, configure_project):
+    fake = FakeProvider()
+    fake.on(Role.DIRECTOR, _plan_sharing(("a", [], ["app.py"]), ("b", [], ["app.py"])))
+    project = configure_project(execution={"serialize_shared_files": False})
+    orch = make_orch(project, fake)
+    run = orch.start_run("x")
+    assert orch.store.get_task(run.id, "b").dependencies == []
+
+
+def _conflicting_readme(resolver):
+    def implementer(req: AgentRequest) -> dict:
+        if "Resolve a merge conflict" in req.prompt:
+            resolver(req)
+            return {"summary": "resolved"}
+        if req.task_key in ("a", "b"):
+            (req.cwd / "README.md").write_text(f"Title\n=======\n\nfrom {req.task_key}\n")
+        return default_implementer(req)
+
+    return implementer
+
+
+def _keep_both(req: AgentRequest) -> None:
+    (req.cwd / "README.md").write_text("Title\n=======\n\nfrom a\nfrom b\n")
+
+
+def test_markdown_heading_underline_is_not_a_conflict_marker(make_orch):
+    fake = FakeProvider()
+    fake.on(Role.DIRECTOR, plan_with(("a", []), ("b", [])))
+    fake.on(Role.IMPLEMENTER, _conflicting_readme(_keep_both))
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.AWAITING_FINAL_APPROVAL, run.failure_reason
+    content = git(orch.p.paths.root, "show", f"{run.integration_branch}:README.md")
+    assert content == "Title\n=======\n\nfrom a\nfrom b\n"
+
+
+def test_resolver_changing_other_files_is_rejected(make_orch):
+    def sloppy(req: AgentRequest) -> None:
+        _keep_both(req)
+        (req.cwd / "unrelated.txt").write_text("not part of the conflict\n")
+
+    fake = FakeProvider()
+    fake.on(Role.DIRECTOR, plan_with(("a", []), ("b", [])))
+    fake.on(Role.IMPLEMENTER, _conflicting_readme(sloppy))
+    orch = make_orch(provider=fake)
+    run = orch.approve_plan(orch.start_run("x").id)
+    assert run.state == RunState.FAILED
+    assert "changed files outside the conflict: unrelated.txt" in run.failure_reason
 
 
 def test_unresolved_conflict_fails_without_retry(make_orch):

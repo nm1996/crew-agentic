@@ -315,6 +315,32 @@ per task. Controls added in 0.4.0:
   pre-approved; Director and Evaluator stay read-only.
 - Default `off`: unchanged behaviour (deny silently), suitable for unattended runs.
 
+## D25. Fewer conflicts between parallel tasks
+
+- **Shared files are ordered at plan time.** When two planned tasks list overlapping
+  `expected_files` (same file, or one inside a listed directory) and neither already
+  depends on the other, the later task in topological order gets a dependency on the
+  nearest earlier one, so they form a chain instead of running in parallel. Doing it in
+  the plan, before approval, keeps it visible (`plan.md`, `plan_serialized` events) and
+  reuses the normal dependency semantics: the later task merges the earlier branch and is
+  BLOCKED if it fails. Edges only point backwards in topological order, so no cycle can
+  appear. `execution.serialize_shared_files: false` turns it off. The Director prompt
+  asks for shared files (build manifests, routers, changelogs) to be listed, because an
+  unlisted shared file cannot be ordered.
+- **A conflict is resolved once.** When a task branch conflicts at integration but is
+  already contained in a later COMPLETED task of the cycle (a diamond: c merged a and b
+  and resolved them in its worktree), the merge is aborted and the branch arrives through
+  that task. Otherwise a second, possibly different, resolution would happen and could
+  conflict with the first. Such tasks are recorded as `integration_deferred` and marked
+  integrated once their commit is in the integration branch; they have no merge commit
+  of their own.
+- **Resolution checks.** A bare `=======` line counts as a leftover marker only when the
+  file has more of them than either side of the merge (it is also a Markdown/reST
+  heading underline); start, end and diff3 base markers always count. Changes the resolver
+  makes outside the conflicted files fail the resolution: CREW commits only the
+  conflicted files, so those changes would otherwise stay uncommitted in the worktree
+  that later merges and verification commands run in. The worktree is preserved.
+
 ## Releases
 
 Version tags `vX.Y.Z` trigger `.github/workflows/release.yml`: the tag must equal the

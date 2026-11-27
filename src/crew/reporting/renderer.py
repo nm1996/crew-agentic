@@ -59,6 +59,10 @@ def render_plan(plan: dict[str, Any]) -> str:
             "",
             f"*Depends on:* {deps}",
             "",
+            *[
+                f"*Ordered by CREW after `{dep}`:* both change {', '.join(files)}\n"
+                for dep, files in (t.get("crew_added_dependencies") or {}).items()
+            ],
             "*Acceptance criteria:*",
             *_bullets(t.get("acceptance_criteria")),
             "",
