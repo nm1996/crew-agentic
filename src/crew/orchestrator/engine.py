@@ -41,7 +41,14 @@ from crew.domain.task_graph import (
     order_shared_files,
     validate_graph,
 )
-from crew.integrations.base import CodeHost, DocPage, DocsTarget, IssueTracker, PublishResult
+from crew.integrations.base import (
+    CodeHost,
+    DocPage,
+    DocsTarget,
+    InlineComment,
+    IssueTracker,
+    PublishResult,
+)
 from crew.orchestrator import recovery
 from crew.orchestrator.implementation import ImplementationStage
 from crew.orchestrator.integration import IntegrationStage
@@ -314,9 +321,21 @@ class Orchestrator(ImplementationStage, IntegrationStage, ReviewStage, Permissio
                 if number is None:
                     raise PreconditionError("no pull request to review; publish with --pr first")
                 review = self.store.latest_output(run_id, Role.REVIEWER) or {}
-                code_host.post_review(number, renderer.render_review_comment(review))
+                inline = [
+                    InlineComment(f["file"], f["line_start"], renderer.render_inline_finding(f))
+                    for f in review.get("findings", [])
+                    if f.get("file") and f.get("line_start")
+                ]
+                placed = code_host.post_review(
+                    number, renderer.render_review_comment(review), inline
+                )
                 result.review_posted = True
-                self.store.add_event(run_id, "review_posted", run.pull_request_url or "")
+                result.inline_comments = placed
+                self.store.add_event(
+                    run_id,
+                    "review_posted",
+                    f"{run.pull_request_url or ''} ({placed}/{len(inline)} inline comment(s))",
+                )
 
             if issue_tracker is not None and run.issue_key:
                 tracker_settings = self.config.integrations.issue_tracker

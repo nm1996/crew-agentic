@@ -5,10 +5,20 @@ from pathlib import Path
 
 import pytest
 
-from crew.config.schema import ConfluenceSettings, FolderDocsSettings, GitHubSettings, JiraSettings
+from crew.config.schema import (
+    ConfluenceSettings,
+    CrewConfig,
+    FolderDocsSettings,
+    GitHubSettings,
+    GitLabSettings,
+    JiraSettings,
+)
+from crew.integrations import factory
 from crew.integrations.adf import adf_to_text, text_to_adf
+from crew.integrations.base import InlineComment
 from crew.integrations.docs import ConfluenceDocs, FolderDocs
 from crew.integrations.github import GitHubHost
+from crew.integrations.gitlab import GitLabHost
 from crew.integrations.http import HttpClient, HttpResponse, IntegrationError, urllib_transport
 from crew.integrations.jira import JiraTracker
 from crew.integrations.markup import markdown_to_storage, storage_to_text
@@ -234,3 +244,118 @@ def test_github_pull_request_review_and_comments():
         ("ana", None, None),
         ("bo", "a.py", 3),
     ]
+
+
+INLINE = [InlineComment("a.py", 3, "Off by one"), InlineComment("b.py", 9, "Typo")]
+
+
+def test_github_inline_review_falls_back_when_a_line_is_not_in_the_diff():
+    ok = FakeTransport({("POST", "/pulls/7/reviews"): (200, {})})
+    host = GitHubHost(GitHubSettings(repo="acme/shop"), transport=ok, token="t")
+    assert host.post_review(7, "body", INLINE) == 2
+    sent = ok.calls[0][3]
+    assert sent["comments"][0] == {"path": "a.py", "line": 3, "side": "RIGHT", "body": "Off by one"}
+
+    class Unprocessable(FakeTransport):
+        def __call__(self, method, url, headers, body):
+            if body and "comments" in json.loads(body):
+                self.calls.append((method, url, headers, json.loads(body)))
+                return HttpResponse(422, b'{"message": "line must be part of the diff"}')
+            return super().__call__(method, url, headers, body)
+
+    rejected = Unprocessable({("POST", "/pulls/7/reviews"): (200, {})})
+    host = GitHubHost(GitHubSettings(repo="acme/shop"), transport=rejected, token="t")
+    assert host.post_review(7, "body", INLINE) == 0
+    assert "comments" not in rejected.calls[-1][3] and rejected.calls[-1][3]["body"] == "body"
+
+
+MR = "/projects/acme%2Fteam%2Fshop/merge_requests"
+
+
+def test_gitlab_merge_request_review_and_notes():
+    transport = FakeTransport(
+        {
+            ("POST", MR): (
+                201,
+                {"iid": 4, "web_url": "https://gitlab.com/acme/team/shop/-/merge_requests/4"},
+            ),
+            ("POST", f"{MR}/4/notes"): (201, {}),
+            ("GET", f"{MR}/4"): (
+                200,
+                {"diff_refs": {"base_sha": "b", "start_sha": "s", "head_sha": "h"}},
+            ),
+            ("POST", f"{MR}/4/discussions"): (201, {}),
+            ("GET", f"{MR}/4/notes?per_page=100"): (
+                200,
+                [
+                    {"system": True, "body": "added 1 commit", "author": {"username": "bot"}},
+                    {"body": "Please add tests", "author": {"username": "ana"}},
+                    {
+                        "body": "Off by one",
+                        "author": {"username": "bo"},
+                        "position": {"new_path": "a.py", "new_line": 3},
+                    },
+                ],
+            ),
+        }
+    )
+    settings = GitLabSettings(project="acme/team/shop")
+    host = GitLabHost(settings, transport=transport, token="glpat-secret")
+    pr = host.open_pull_request("crew/r/integration", "main", "Title", "body", draft=True)
+    assert pr.number == 4 and pr.url.endswith("/merge_requests/4")
+    sent = transport.calls[0][3]
+    assert sent["source_branch"] == "crew/r/integration" and sent["title"] == "Draft: Title"
+    assert transport.calls[0][2]["Authorization"] == "Bearer glpat-secret"
+    assert host.post_review(4, "findings", INLINE) == 2
+    discussion = transport.calls[-1][3]
+    assert discussion["position"] == {
+        "position_type": "text",
+        "base_sha": "b",
+        "start_sha": "s",
+        "head_sha": "h",
+        "new_path": "b.py",
+        "new_line": 9,
+    }
+    comments = host.fetch_review_comments(4)
+    assert [(c.author, c.path, c.line) for c in comments] == [
+        ("ana", None, None),
+        ("bo", "a.py", 3),
+    ]
+
+
+def test_gitlab_skips_inline_comments_outside_the_diff():
+    class OutsideDiff(FakeTransport):
+        def __call__(self, method, url, headers, body):
+            if url.endswith("/discussions") and json.loads(body)["position"]["new_path"] == "a.py":
+                self.calls.append((method, url, headers, json.loads(body)))
+                return HttpResponse(400, b'{"message": "line_code can not be blank"}')
+            return super().__call__(method, url, headers, body)
+
+    transport = OutsideDiff(
+        {
+            ("POST", f"{MR}/4/notes"): (201, {}),
+            ("GET", f"{MR}/4"): (
+                200,
+                {"diff_refs": {"base_sha": "b", "start_sha": "s", "head_sha": "h"}},
+            ),
+            ("POST", f"{MR}/4/discussions"): (201, {}),
+        }
+    )
+    host = GitLabHost(GitLabSettings(project="acme/team/shop"), transport=transport, token="t")
+    assert host.post_review(4, "findings", INLINE) == 1
+
+
+def test_gitlab_needs_a_token_and_is_chosen_by_the_factory(monkeypatch):
+    monkeypatch.delenv("GITLAB_TOKEN", raising=False)
+    with pytest.raises(IntegrationError, match="GITLAB_TOKEN"):
+        GitLabHost(GitLabSettings(project="acme/shop"))
+    monkeypatch.setenv("GITLAB_TOKEN", "t")
+    config = CrewConfig.model_validate(
+        {
+            "project": {"name": "shop"},
+            "integrations": {"code_host": {"kind": "gitlab", "project": "acme/shop"}},
+        }
+    )
+    assert isinstance(factory.code_host(config), GitLabHost)
+    with pytest.raises(ValueError):
+        GitLabSettings(project="no-namespace")

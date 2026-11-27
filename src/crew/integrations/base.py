@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -47,6 +48,15 @@ class ReviewComment:
     line: int | None = None
 
 
+@dataclass(frozen=True)
+class InlineComment:
+    """A review comment on one line of the pull request's new version of a file."""
+
+    path: str
+    line: int
+    body: str
+
+
 @dataclass
 class PublishResult:
     """What `crew publish` did, for the CLI and the event log."""
@@ -54,6 +64,7 @@ class PublishResult:
     pushed_branch: str | None = None
     pull_request: PullRequest | None = None
     review_posted: bool = False
+    inline_comments: int = 0
     issue_commented: bool = False
     issue_transitioned: str | None = None
     doc_url: str | None = None
@@ -77,7 +88,13 @@ class CodeHost(Protocol):
         self, branch: str, base: str, title: str, body: str, *, draft: bool = False
     ) -> PullRequest: ...
 
-    def post_review(self, number: int, body: str) -> None: ...
+    def post_review(self, number: int, body: str, comments: Sequence[InlineComment] = ()) -> int:
+        """Post a review; returns how many inline comments were placed on lines.
+
+        Comments on lines outside the diff cannot be placed; the body lists every
+        finding anyway.
+        """
+        ...
 
     def fetch_review_comments(self, number: int) -> list[ReviewComment]: ...
 

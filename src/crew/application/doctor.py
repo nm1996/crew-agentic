@@ -170,7 +170,7 @@ def check_integrations(config: CrewConfig) -> list[Check]:
             continue
         envs = [getattr(settings, a) for a in ("email_env", "token_env") if hasattr(settings, a)]
         missing = [e for e in envs if not os.environ.get(e)]
-        if label == "Code host" and missing and shutil.which("gh"):
+        if label == "Code host" and settings.kind == "github" and missing and shutil.which("gh"):
             missing = []  # GitHub falls back to `gh auth token`
         if missing:
             checks.append(

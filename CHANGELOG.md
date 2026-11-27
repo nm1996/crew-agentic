@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- GitLab code host (`integrations.code_host.kind: gitlab`, gitlab.com or self-managed):
+  `crew publish --pr` opens a merge request, `--review` posts notes, `--pr-comments` reads
+  MR notes.
+- `crew publish --review` posts Reviewer findings that name a file and line as inline
+  comments (GitHub and GitLab), on top of the full review body.
 - `execution.skip_evaluation_max_lines`: skip the External Evaluator for small changes
   whose verification commands all passed and that have no blocking findings (D26).
 - Director `project_notes` (build/test commands, layout, conventions) are passed to every

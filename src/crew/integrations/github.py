@@ -10,10 +10,11 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from collections.abc import Sequence
 from urllib.parse import quote
 
 from crew.config.schema import GitHubSettings
-from crew.integrations.base import PullRequest, ReviewComment
+from crew.integrations.base import InlineComment, PullRequest, ReviewComment
 from crew.integrations.http import HttpClient, IntegrationError, Transport
 
 MAX_BODY_CHARS = 60_000  # GitHub limits PR/review bodies to 65,536 characters
@@ -63,10 +64,22 @@ class GitHubHost:
         )
         return PullRequest(number=int(data["number"]), url=str(data["html_url"]), branch=branch)
 
-    def post_review(self, number: int, body: str) -> None:
-        self.http.post(
-            f"{self._repo}/pulls/{number}/reviews", {"body": _clip(body), "event": "COMMENT"}
-        )
+    def post_review(self, number: int, body: str, comments: Sequence[InlineComment] = ()) -> int:
+        path = f"{self._repo}/pulls/{number}/reviews"
+        review = {"body": _clip(body), "event": "COMMENT"}
+        if comments:
+            inline = [
+                {"path": c.path, "line": c.line, "side": "RIGHT", "body": _clip(c.body)}
+                for c in comments
+            ]
+            try:
+                self.http.post(path, {**review, "comments": inline})
+                return len(inline)
+            except IntegrationError as exc:
+                if exc.status != 422:  # 422: a line is not part of the diff
+                    raise
+        self.http.post(path, review)
+        return 0
 
     def fetch_review_comments(self, number: int) -> list[ReviewComment]:
         comments: list[ReviewComment] = []

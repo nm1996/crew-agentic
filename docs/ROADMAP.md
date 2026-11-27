@@ -53,8 +53,8 @@ run passes on Linux.
 
 Status: permission prompts (D24) and adapters for Jira, GitHub, Confluence and a
 Markdown folder (D23) are implemented, with `crew run --issue/--doc/--pr-comments` and
-`crew publish`. Adapters are verified against fakes; GitLab and inline review comments are
-still open. The design notes below are kept for reference.
+`crew publish`. GitLab and inline review comments followed in 0.7.0. Adapters are
+verified against fakes. The design notes below are kept for reference.
 
 Goal: CREW works with the systems around the code (issue tracker, code host, review,
 documentation) through small, explicit adapters, and an agent that lacks a permission

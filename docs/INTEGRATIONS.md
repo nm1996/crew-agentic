@@ -5,7 +5,8 @@ CREW can read work from, and report results to, the systems around your code:
 | Kind | Adapter | Reads | Writes (only on `crew publish`) |
 |---|---|---|---|
 | Issue tracker | Jira Cloud (REST v3) | issue title + description → run request | comment, transition |
-| Code host | GitHub (REST) | PR review comments → run request | push the CREW branch, pull request, review |
+| Code host | GitHub (REST) | PR review comments → run request | push the CREW branch, pull request, review with inline comments |
+| Code host | GitLab (REST v4, gitlab.com or self-managed) | MR notes and diff comments → run request | push the CREW branch, merge request, notes with inline diff comments |
 | Documentation | Confluence Cloud (REST v2) | pages → Director context | report as a new page |
 | Documentation | Markdown folder in the repo | files → Director context | report as a new file |
 
@@ -38,6 +39,12 @@ integrations:
     remote: origin
     base_branch: null                # default: the run's base branch
     token_env: GITHUB_TOKEN          # falls back to `gh auth token`
+  # or, for GitLab:
+  # code_host:
+  #   kind: gitlab
+  #   project: acme/team/shop        # full path, subgroups allowed
+  #   api_url: https://gitlab.com/api/v4   # your instance's /api/v4 when self-managed
+  #   token_env: GITLAB_TOKEN
   docs:
     kind: confluence                 # or: kind: folder, path: docs/crew-reports
     base_url: https://acme.atlassian.net
@@ -56,6 +63,7 @@ Credentials:
 |---|---|---|
 | Jira / Confluence Cloud | an [Atlassian API token](https://id.atlassian.com/manage-profile/security/api-tokens) | `JIRA_EMAIL`, `JIRA_API_TOKEN` (and/or `CONFLUENCE_…`) |
 | GitHub | a fine-grained token with *Contents: read/write* and *Pull requests: read/write* on the repo, or `gh auth login` | `GITHUB_TOKEN` |
+| GitLab | a personal, project or group access token with the `api` scope | `GITLAB_TOKEN` |
 | Markdown folder | nothing | – |
 
 Pushing uses your normal Git credentials for the remote (SSH key or credential helper).
@@ -81,9 +89,15 @@ crew publish <run-id> --docs               # the final report as a Confluence pa
 crew publish <run-id> --pr --no-issue      # do not touch the linked issue
 ```
 
+With `--review`, every Reviewer finding that names a file and line is also posted as an
+inline comment on that line; the review body still lists all findings. GitHub rejects the
+whole set when one line is outside the diff, so CREW then posts the body alone; GitLab
+skips only the comments it cannot place. `crew publish` reports how many were placed.
+`--pr-comments N` reads a GitLab merge request's notes the same way.
+
 CREW lists what it is about to do and asks before doing it. If the run was started with
 `--issue`, the issue gets a comment with the PR link (and the configured transition).
-The PR is a normal PR: review and merge it in GitHub as usual.
+The PR (or MR) is a normal one: review and merge it as usual.
 
 ## Adding an adapter
 

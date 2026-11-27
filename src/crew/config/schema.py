@@ -202,6 +202,15 @@ class GitHubSettings(_Strict):
     api_url: str = Field(default="https://api.github.com", pattern=r"^https://")
 
 
+class GitLabSettings(_Strict):
+    kind: Literal["gitlab"] = "gitlab"
+    project: str = Field(pattern=r"^[\w.-]+(/[\w.-]+)+$", description="group/[subgroup/]name")
+    remote: str = "origin"
+    base_branch: str | None = None  # default: the run's base branch
+    token_env: str = Field(default="GITLAB_TOKEN", pattern=_ENV_NAME)
+    api_url: str = Field(default="https://gitlab.com/api/v4", pattern=r"^https://")
+
+
 class ConfluenceSettings(_Strict):
     kind: Literal["confluence"] = "confluence"
     base_url: str = Field(pattern=r"^https://", description="e.g. https://acme.atlassian.net")
@@ -220,7 +229,7 @@ class FolderDocsSettings(_Strict):
 
 class IntegrationSettings(_Strict):
     issue_tracker: JiraSettings | None = None
-    code_host: GitHubSettings | None = None
+    code_host: GitHubSettings | GitLabSettings | None = Field(default=None, discriminator="kind")
     docs: ConfluenceSettings | FolderDocsSettings | None = Field(default=None, discriminator="kind")
 
 

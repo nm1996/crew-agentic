@@ -182,6 +182,17 @@ def render_review_comment(review: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_inline_finding(finding: dict[str, Any]) -> str:
+    """One Reviewer finding as an inline comment on its line."""
+    head = f"**[{finding.get('severity')}/{finding.get('category')}] {finding.get('title', '')}**"
+    if finding.get("blocking"):
+        head += " (blocking)"
+    lines = [head, "", str(finding.get("explanation", ""))]
+    if finding.get("recommendation"):
+        lines += ["", f"Recommendation: {finding['recommendation']}"]
+    return "\n".join(lines)
+
+
 def render_issue_comment(run: Run) -> str:
     lines = [f"CREW run {run.id} was completed and accepted by the developer."]
     if run.pull_request_url:

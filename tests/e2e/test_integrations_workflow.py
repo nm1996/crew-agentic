@@ -6,9 +6,10 @@ import pytest
 
 from crew.application.integrations import gather_sources
 from crew.config.schema import GitHubSettings
-from crew.domain.enums import RunState
+from crew.domain.enums import Role, RunState
 from crew.domain.errors import InvalidTransitionError, PolicyViolationError
 from crew.integrations.base import DocPage, Issue, PullRequest, ReviewComment
+from crew.providers.fake import FakeProvider
 from tests.conftest import git
 
 
@@ -40,8 +41,9 @@ class FakeHost:
         self.prs.append((branch, base, title, body, draft))
         return PullRequest(number=5, url="https://gh/acme/shop/pull/5", branch=branch)
 
-    def post_review(self, number, body):
-        self.reviews.append((number, body))
+    def post_review(self, number, body, comments=()):
+        self.reviews.append((number, body, list(comments)))
+        return len(comments)
 
     def fetch_review_comments(self, number):
         return [ReviewComment(author="ana", body="Rename x to count", path="app.py", line=2)]
@@ -157,3 +159,42 @@ def test_publish_requires_completed_runs(make_orch, fakes):
     assert run.state == RunState.AWAITING_PLAN_APPROVAL
     with pytest.raises(InvalidTransitionError):
         orch.publish(run.id, docs=fakes[2])
+
+
+def test_review_findings_with_a_line_become_inline_comments(make_orch, configure_project, fakes):
+    _, host, _ = fakes
+
+    def reviewer(_req):
+        finding = {
+            "severity": "LOW",
+            "category": "maintainability",
+            "explanation": "The name does not say what it holds.",
+            "recommendation": "Rename it.",
+            "blocking": False,
+        }
+        return {
+            "assessment": "fine",
+            "findings": [
+                {
+                    **finding,
+                    "title": "Unclear name",
+                    "file": "crew_fake/part-a.md",
+                    "line_start": 1,
+                },
+                {**finding, "title": "General remark"},
+            ],
+            "checks_run": [],
+        }
+
+    project = configure_project(
+        integrations={"code_host": GitHubSettings(repo="acme/shop").model_dump()}
+    )
+    orch = make_orch(project, FakeProvider().on(Role.REVIEWER, reviewer))
+    run = orch.accept(orch.approve_plan(orch.start_run("x").id).id)
+    run = orch.store.update_run(run.id, pull_request_url="https://gh/acme/shop/pull/5")
+    result = orch.publish(run.id, code_host=host, post_review=True)
+    number, body, comments = host.reviews[0]
+    assert number == 5 and "General remark" in body and "Unclear name" in body
+    assert [(c.path, c.line) for c in comments] == [("crew_fake/part-a.md", 1)]
+    assert "Unclear name" in comments[0].body and "Rename it." in comments[0].body
+    assert result.inline_comments == 1

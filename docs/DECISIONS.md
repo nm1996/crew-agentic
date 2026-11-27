@@ -296,8 +296,11 @@ per task. Controls added in 0.4.0:
   `gh auth token`); they are never persisted. Integration URLs must be HTTPS.
 - Rich-text formats are converted with small purpose-built converters (ADF for Jira,
   storage XHTML for Confluence) rather than new dependencies.
-- Not yet: GitLab/Bitbucket, Jira Server/Data Center, inline PR review comments (the
-  review is posted as one body to avoid position errors). Verified with fakes only; the
+- Not yet: Bitbucket, Jira Server/Data Center. GitLab and inline review comments were
+  added in 0.7.0: inline comments are best effort on top of the full review body, since a
+  line outside the diff cannot be commented on (GitHub rejects the whole review with 422,
+  so CREW retries with the body alone; GitLab rejects one discussion with 400, so CREW
+  skips that one). Verified with fakes only; the
   real services have not been called because no credentials were available.
 
 ## D24. Permission prompts

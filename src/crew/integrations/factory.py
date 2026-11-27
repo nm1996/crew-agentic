@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from crew.config.schema import CrewConfig, FolderDocsSettings
+from crew.config.schema import CrewConfig, FolderDocsSettings, GitLabSettings
 from crew.integrations.base import CodeHost, DocsTarget, IssueTracker
 from crew.integrations.docs import ConfluenceDocs, FolderDocs
 from crew.integrations.github import GitHubHost
+from crew.integrations.gitlab import GitLabHost
 from crew.integrations.http import IntegrationError, Transport
 from crew.integrations.jira import JiraTracker
 
@@ -27,9 +28,11 @@ def code_host(config: CrewConfig, *, transport: Transport | None = None) -> Code
     if settings is None:
         raise IntegrationError(
             "no code host configured",
-            hint="Add integrations.code_host (kind: github, repo: owner/name) to "
-            ".crew/config.yaml.",
+            hint="Add integrations.code_host (kind: github, repo: owner/name, or kind: gitlab, "
+            "project: group/name) to .crew/config.yaml.",
         )
+    if isinstance(settings, GitLabSettings):
+        return GitLabHost(settings, transport=transport)
     return GitHubHost(settings, transport=transport)
 
 

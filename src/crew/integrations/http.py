@@ -25,6 +25,10 @@ DEFAULT_TIMEOUT_SECONDS = 30
 class IntegrationError(CrewError):
     exit_code = 13
 
+    def __init__(self, message: str, *, hint: str | None = None, status: int | None = None):
+        super().__init__(message, hint=hint)
+        self.status = status  # HTTP status, when the service answered with an error
+
 
 @dataclass(frozen=True)
 class HttpResponse:
@@ -80,7 +84,10 @@ class HttpClient:
         response = self._transport(method, url, headers, body)
         if response.status >= 400:
             detail = redact(response.body.decode("utf-8", errors="replace"))[:500]
-            raise IntegrationError(f"{method} {url} returned HTTP {response.status}: {detail}")
+            raise IntegrationError(
+                f"{method} {url} returned HTTP {response.status}: {detail}",
+                status=response.status,
+            )
         return response.json()
 
     def get(self, path: str) -> Any:

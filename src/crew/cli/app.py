@@ -308,7 +308,7 @@ def publish(
         remote = config.integrations.code_host.remote  # type: ignore[union-attr]
         actions.append(f"push {run.integration_branch} to {remote} and open a pull request")
     if review:
-        actions.append("post the Reviewer's findings as a PR review")
+        actions.append("post the Reviewer's findings as a PR review, inline where possible")
     if issue and run.issue_key and config.integrations.issue_tracker:
         tracker = integration_factory.issue_tracker(config)
         actions.append(f"comment on {run.issue_key}")
@@ -338,7 +338,7 @@ def publish(
     if result.pull_request:
         console.print(f"Pull request: [bold]{result.pull_request.url}[/]")
     if result.review_posted:
-        console.print("Review posted.")
+        console.print(f"Review posted ({result.inline_comments} inline comment(s)).")
     if result.issue_commented:
         console.print(f"Commented on {run.issue_key}.")
     if result.issue_transitioned:
