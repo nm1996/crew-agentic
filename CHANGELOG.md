@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-27
+
 ### Added
 - `execution.serialize_shared_files` (default on): planned tasks whose expected files
   overlap get a dependency on each other, so they never run in parallel on the same file.
@@ -20,6 +22,9 @@ All notable changes to this project are documented here. The format follows
   conflict marker and failed the run.
 - Files the conflict resolver changed outside the conflict were left uncommitted in the
   worktree; the resolution is now rejected instead.
+- Documentation: README and specs said CREW never pushes, although `crew publish --pr`
+  pushes the run's integration branch; architecture layout, roadmap status and command
+  list caught up with 0.3–0.5.
 
 ## [0.5.1] - 2026-11-26
 

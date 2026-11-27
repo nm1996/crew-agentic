@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from crew import __version__
 from crew.cli.app import app
 
 runner = CliRunner()
@@ -30,7 +31,7 @@ def run_id_from(output: str) -> str:
 
 def test_version():
     result = invoke("--version")
-    assert result.exit_code == 0 and "crew 0.5.1" in result.output
+    assert result.exit_code == 0 and f"crew {__version__}" in result.output
 
 
 def test_commands_before_init_exit_with_config_code(in_repo):
