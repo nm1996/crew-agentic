@@ -12,7 +12,7 @@ important decisions and risky actions require explicit approval.
 | [INSTALLATION.md](INSTALLATION.md) | Installing CREW and setting up a project; troubleshooting. |
 | [USAGE.md](USAGE.md) | Running a request end to end; command reference; exit codes; recovery. |
 | [CONFIGURATION.md](CONFIGURATION.md) | Changing `.crew/config.yaml`; verification commands; agent permissions. |
-| [INTEGRATIONS.md](INTEGRATIONS.md) | Jira, GitHub, Confluence: runs from issues/docs/PR reviews, `crew publish`. |
+| [INTEGRATIONS.md](INTEGRATIONS.md) | Jira, GitHub, GitLab, Confluence: runs from issues/docs/PR reviews, `crew publish`. |
 | [examples/](examples/README.md) | Measured real runs: what CREW produced, independent checks, cost per role. |
 
 ## Specifications
