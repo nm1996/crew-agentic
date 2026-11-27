@@ -895,3 +895,13 @@ def test_evaluator_runs_unless_every_skip_condition_holds(
     orch = make_orch(configure_project(execution=execution), fake)
     orch.approve_plan(orch.start_run("x").id)
     assert any(c.role is Role.EVALUATOR for c in fake.calls)
+
+
+def test_director_project_notes_reach_every_implementer(make_orch, fake):
+    orch = make_orch()
+    run = orch.approve_plan(orch.start_run("x").id)
+    prompts = [c.prompt for c in fake.calls if c.role is Role.IMPLEMENTER]
+    assert prompts and all("# Project notes from the Director" in p for p in prompts)
+    assert all("Fake tasks write Markdown files under crew_fake/." in p for p in prompts)
+    plan_md = (orch.p.paths.run_dir(run.id) / "plan.md").read_text()
+    assert "## Project notes for Implementers" in plan_md

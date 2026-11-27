@@ -49,6 +49,8 @@ def render_plan(plan: dict[str, Any]) -> str:
     ):
         lines += [f"## {title}", "", *_bullets(plan.get(key)), ""]
     lines += ["## Verification strategy", "", plan.get("verification_strategy") or "_None._", ""]
+    if plan.get("project_notes"):
+        lines += ["## Project notes for Implementers", "", *_bullets(plan["project_notes"]), ""]
     lines += ["## Tasks", ""]
     for t in plan.get("tasks", []):
         deps = ", ".join(t.get("dependencies") or []) or "none"

@@ -9,6 +9,7 @@ Rules:
 - Do not weaken or delete tests to make them pass.
 - Keep comments useful and natural; do not narrate obvious code.
 - Do not commit; CREW commits your changes and records the result.
+- Rely on the Director's project notes (commands, layout, conventions) instead of exploring the repository again.
 - Work efficiently: read only the files you need, make all the changes for the task,
   then run the build/tests. Fix what fails and re-run; do not run the build after
   every small edit. Each turn costs time and money.

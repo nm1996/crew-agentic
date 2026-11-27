@@ -9,6 +9,9 @@ All notable changes to this project are documented here. The format follows
 ### Added
 - `execution.skip_evaluation_max_lines`: skip the External Evaluator for small changes
   whose verification commands all passed and that have no blocking findings (D26).
+- Director `project_notes` (build/test commands, layout, conventions) are passed to every
+  Implementer and shown in `plan.md`, so Implementers do not rediscover the project; the
+  Director is told about the fixed per-task cost and not to over-split (D26).
 
 ### Changed
 - Git commands of parallel tasks run off the event loop, so one task's merge or commit no

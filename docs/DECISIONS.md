@@ -355,6 +355,10 @@ per task. Controls added in 0.4.0:
   `EXTERNAL_EVALUATION` (no state-machine change), the skip is an event, and both
   `external-evaluation.md` and the final report say why. Off by default: the Evaluator is
   advisory, the developer's final gate is unchanged.
+- **Shared project notes.** Every task paid ~$0.4–0.7 mostly for re-reading the project
+  and finding the build. The Director already explored it, so its plan carries
+  `project_notes` that go into every Implementer prompt; the Director prompt also states
+  the per-task cost so it does not split small changes into many sequential tasks.
 
 ## Releases
 

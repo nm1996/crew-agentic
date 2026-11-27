@@ -98,6 +98,11 @@ def implementer_prompt(run: Run, task: Task, dependency_reports: dict[str, Any])
         "",
         str(plan.get("approach", "")),
         "",
+        *(
+            ["# Project notes from the Director", "", *[f"- {n}" for n in notes], ""]
+            if (notes := plan.get("project_notes"))
+            else []
+        ),
         f"# Your task: {task.key} — {task.title}",
         "",
         task.description,

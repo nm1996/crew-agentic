@@ -45,6 +45,7 @@ def default_director(request: AgentRequest) -> dict[str, Any]:
         ],
         "risks": [],
         "verification_strategy": "Check that each file exists.",
+        "project_notes": ["Fake tasks write Markdown files under crew_fake/."],
     }
 
 

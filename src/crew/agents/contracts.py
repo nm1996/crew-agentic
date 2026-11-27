@@ -41,6 +41,11 @@ class DirectorPlan(_Contract):
     tasks: list[PlannedTask] = Field(min_length=1, max_length=12)
     risks: list[str] = Field(default_factory=list)
     verification_strategy: str = ""
+    project_notes: list[str] = Field(
+        default_factory=list,
+        description="Facts every Implementer needs and would otherwise rediscover: exact "
+        "build/test commands, layout, conventions, files to imitate",
+    )
     blocking_ambiguity: str | None = Field(
         default=None,
         description="Set only if the request is too ambiguous to plan safely; explain why.",
